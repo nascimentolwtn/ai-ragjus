@@ -47,17 +47,47 @@ perguntar_ollama() {
     local json_payload
     json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$prompt" '{"model": $model, "prompt": $prompt, "stream": true}')
 
-    # Executa a chamada em streaming
-    # Cada bloco de resposta é impresso no terminal imediatamente à medida que chega
-    curl -s -N -X POST "$OLLAMA_URL/api/generate" \
-        -H "Content-Type: application/json" \
-        -d "$json_payload" | while IFS= read -r line; do
-            if [ -n "$line" ]; then
-                # Decodifica a resposta parcial e imprime sem quebra de linha
-                local token
-                token=$(echo "$line" | jq -r '.response' 2>/dev/null || echo -n "")
-                echo -ne "${GREEN}${token}${NC}"
+    local response_started=false
+    local has_error=false
+    local tmp_err
+    tmp_err=$(mktemp 2>/dev/null || echo "/tmp/ollama_err.txt")
+
+    # Executa a chamada em streaming e processa linha a linha
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            # Verifica se há mensagem de erro no JSON retornado
+            local erro
+            erro=$(echo "$line" | jq -r '.error // empty' 2>/dev/null || echo "")
+            if [ -n "$erro" ]; then
+                echo -e "\n${RED}[Erro do Ollama]: $erro${NC}" >&2
+                has_error=true
+                break
             fi
-        done
-    echo "" # Quebra de linha ao final do streaming
+
+            local token
+            token=$(echo "$line" | jq -r '.response // empty' 2>/dev/null || echo -n "")
+            if [ -n "$token" ]; then
+                echo -ne "${GREEN}${token}${NC}"
+                response_started=true
+            fi
+        fi
+    done < <(curl -s -N -X POST "$OLLAMA_URL/api/generate" \
+        -H "Content-Type: application/json" \
+        -d "$json_payload" 2>"$tmp_err" || echo "")
+
+    # Se nada foi impresso, diagnostica a falha
+    if [ "$response_started" = false ] && [ "$has_error" = false ]; then
+        if [ -f "$tmp_err" ] && [ -s "$tmp_err" ]; then
+            local curl_err
+            curl_err=$(cat "$tmp_err")
+            echo -e "${RED}[Erro de Conexão]: Falha ao se conectar com o Ollama.${NC}" >&2
+            echo -e "${RED}Detalhes: $curl_err${NC}" >&2
+        else
+            echo -e "${RED}[Erro]: Nenhuma resposta foi retornada pelo Ollama.${NC}" >&2
+            echo -e "${RED}Verifique se o modelo '$MODELO_IA' está carregado corretamente e se há memória RAM livre suficiente.${NC}" >&2
+        fi
+    fi
+
+    rm -f "$tmp_err" 2>/dev/null || true
+    echo "" # Quebra de linha ao final
 }
