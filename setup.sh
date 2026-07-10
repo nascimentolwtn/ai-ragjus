@@ -208,7 +208,7 @@ while true; do
     else
         echo -e "${GREEN}[OK] Todas as ferramentas CLI básicas estão instaladas com sucesso!${NC}"
         echo ""
-        ler_entrada "Pressione [Enter] para prosseguir..."
+        sleep 1
         break
     fi
 done
