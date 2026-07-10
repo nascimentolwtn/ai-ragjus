@@ -103,10 +103,12 @@ buscar_trechos_relevantes() {
         --argjson top "$limite" \
         '
         def dot_product(a; b):
-          reduce range(0; a | length) as $i (0; . + (a[$i] * b[$i]));
+          a as $a | b as $b |
+          reduce range(0; $a | length) as $i (0; . + ($a[$i] * $b[$i]));
         
         def magnitude(a):
-          reduce range(0; a | length) as $i (0; . + (a[$i] * a[$i])) | sqrt;
+          a as $a |
+          reduce range(0; $a | length) as $i (0; . + ($a[$i] * $a[$i])) | sqrt;
         
         def cosine_similarity(a; b):
           magnitude(a) as $magA |
