@@ -90,6 +90,15 @@ Você pode editar o arquivo `config.conf` manualmente ou através do menu princi
 
 ---
 
+## 🛡️ Auto-recuperação de Modelos (Self-healing)
+
+O sistema possui uma inteligência de **auto-recuperação (self-healing)** para garantir uma experiência livre de quebras para o usuário final:
+* **Detecção Automática**: Caso o advogado altere as configurações para um modelo de IA ou embedding que não esteja atualmente baixado em seu Ollama, a aplicação detecta o erro de modelo ausente na hora de fazer a pergunta.
+* **Frictionless Download**: Em vez de travar ou retornar um erro, o chat pergunta na tela se o usuário deseja efetuar o download daquele modelo de forma automática.
+* **Continuidade do Fluxo**: Se aceito, o próprio sistema baixa o modelo exibindo o progresso. Assim que o download é concluído, **o chat reprocessa e responde à pergunta original automaticamente**, sem que o usuário precise reiniciar o programa ou digitar a pergunta novamente.
+
+---
+
 ## 🔒 Segurança e Privacidade (Air-Gapped por Padrão)
 
 A aplicação foi desenvolvida sob a filosofia de privacidade estrita. 
