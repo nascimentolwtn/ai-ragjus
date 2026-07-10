@@ -70,10 +70,11 @@ salvar_bloco_vetorial() {
     sqlite3 "$db_path" "INSERT INTO document_chunks (caminho_arquivo, hash_arquivo, chunk_index, conteudo_texto, vetor_embedding) VALUES ('$arquivo', '$hash_val', $idx, '$texto_escapado', '$vetor');"
 }
 
-# Realiza a busca vetorial por similaridade de cosseno
-# Retorna um array JSON contendo os 3 trechos de texto mais semelhantes
+# Realiza a busca vetorial por similaridade de cosseno (com suporte a filtro dinâmico de acervo)
+# Retorna um array JSON contendo os trechos de texto mais semelhantes
 buscar_trechos_relevantes() {
     local vetor_pergunta="$1"
+    local query_original="$2"
     local limite=10
     local db_path
     db_path=$(obter_db_path)
@@ -83,10 +84,29 @@ buscar_trechos_relevantes() {
         return
     fi
 
-    # Recupera todos os chunks cadastrados serializados em formato JSON
-    # Isso evita problemas com quebras de linha no texto
+    # Filtro de acervo dinâmico por metadados (número do processo)
+    local where_clause=""
+    if [ -n "$query_original" ]; then
+        # Extrai número de processo (4 dígitos + ponto opcional + 10 dígitos)
+        local reg_num
+        reg_num=$(echo "$query_original" | grep -oE '[0-9]{4}\.?[0-9]{10}' | head -n 1 || echo "")
+        if [ -z "$reg_num" ]; then
+            # Alternativamente, busca qualquer padrão numérico longo no texto (ex: 5+ dígitos)
+            reg_num=$(echo "$query_original" | grep -oE '[0-9]{5,}' | head -n 1 || echo "")
+        fi
+
+        if [ -n "$reg_num" ]; then
+            local reg_clean
+            reg_clean=${reg_num//./}
+            where_clause="WHERE caminho_arquivo LIKE '%$reg_num%' OR replace(caminho_arquivo, '.', '') LIKE '%$reg_clean%'"
+            # Imprime aviso visual na stderr (pois stdout retorna o JSON)
+            echo -e "${YELLOW}[Filtro de Acervo Ativo: $reg_num (Buscando apenas neste arquivo)]${NC}" >&2
+        fi
+    fi
+
+    # Recupera os chunks filtrados ou todos serializados em formato JSON
     local dados_json
-    dados_json=$(sqlite3 "$db_path" "SELECT json_object('caminho', caminho_arquivo, 'texto', conteudo_texto, 'vetor', json(vetor_embedding)) FROM document_chunks;")
+    dados_json=$(sqlite3 "$db_path" "SELECT json_object('caminho', caminho_arquivo, 'texto', conteudo_texto, 'vetor', json(vetor_embedding)) FROM document_chunks $where_clause;" 2>/dev/null || echo "")
 
     if [ -z "$dados_json" ]; then
         echo "[]"

@@ -35,12 +35,13 @@ menu_principal() {
         echo -e "  ${GREEN}3)${NC} Alterar Modelo da IA Local [Atual: ${BLUE}$MODELO_IA${NC}]"
         echo -e "  ${GREEN}4)${NC} Alterar Pasta de Documentos Alvo"
         echo -e "  ${GREEN}5)${NC} Informações de Hardware & Sistema"
-        echo -e "  ${GREEN}6)${NC} Sair do Sistema"
+        echo -e "  ${GREEN}6)${NC} Configurações Avançadas"
+        echo -e "  ${GREEN}7)${NC} Sair do Sistema"
         echo -e ""
         echo -e "${GREEN}=========================================================================${NC}"
         
         local opcao
-        read -p "Digite a opção desejada (1-6): " opcao
+        read -p "Digite a opção desejada (1-7): " opcao
         
         case "$opcao" in
             1)
@@ -73,9 +74,9 @@ menu_principal() {
                         continue
                     fi
                     
-                    # 2. Busca trechos semelhantes
+                    # 2. Busca trechos semelhantes (passa a query original para filtro de acervo)
                     local trechos
-                    trechos=$(buscar_trechos_relevantes "$vetor_query" 2>/dev/null || echo "[]")
+                    trechos=$(buscar_trechos_relevantes "$vetor_query" "$query" 2>/dev/null || echo "[]")
                     
                     # Exibe fontes localizadas para transparência de RAG
                     local fontes
@@ -168,10 +169,105 @@ $query"
                 read -p "Pressione [Enter] para retornar ao menu..."
                 ;;
             6)
+                # Abre o sub-menu de Configurações Avançadas
+                menu_configuracoes_avancadas
+                ;;
+            7)
                 limpar_tela_retro
                 exibir_texto_digitando "Saindo do AI-JusRAG. Até logo!"
                 echo ""
                 exit 0
+                ;;
+            *)
+                echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Sub-menu interativo de Configurações Avançadas
+menu_configuracoes_avancadas() {
+    while true; do
+        limpar_tela_retro
+        echo -e "${GREEN}=========================================================================${NC}"
+        echo -e "${GREEN}                     CONFIGURAÇÕES AVANÇADAS                             ${NC}"
+        echo -e "${GREEN}=========================================================================${NC}"
+        echo -e "  1) Alterar Temperatura da IA [Atual: ${BLUE}$TEMPERATURA${NC}] (0.0 = preciso, 0.7 = criativo)"
+        echo -e "  2) Alterar Tamanho do Bloco / Chunk Size [Atual: ${BLUE}$CHUNK_SIZE${NC}] (caracteres)"
+        echo -e "  3) Alterar Sobreposição de Bloco / Chunk Overlap [Atual: ${BLUE}$CHUNK_OVERLAP${NC}] (caracteres)"
+        echo -e "  4) Alterar Tamanho Máximo de Arquivo [Atual: ${BLUE}$MAX_FILE_SIZE_MB MB${NC}]"
+        echo -e "  5) Alterar Modelo de Embedding [Atual: ${BLUE}$MODELO_EMBEDDING${NC}]"
+        echo -e "  6) Voltar ao Menu Principal"
+        echo -e ""
+        echo -e "${GREEN}=========================================================================${NC}"
+        
+        local opcao_avancada
+        read -p "Digite a opção desejada (1-6): " opcao_avancada
+        
+        case "$opcao_avancada" in
+            1)
+                limpar_tela_retro
+                echo -e "${GREEN}Alterar Temperatura da IA${NC}"
+                echo -e "A temperatura determina o nível de criatividade da IA (0.0 = literal/fiel, 1.0 = muito criativo)."
+                local nova_temp
+                read -p "Digite o novo valor (0.0 a 1.0) (atual '$TEMPERATURA'): " nova_temp
+                if [ -n "$nova_temp" ]; then
+                    atualizar_configuracao "TEMPERATURA" "$nova_temp" "$APP_DIR"
+                    exibir_texto_digitando "Temperatura atualizada para: $nova_temp"
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            2)
+                limpar_tela_retro
+                echo -e "${GREEN}Alterar Tamanho do Bloco (Chunk Size)${NC}"
+                echo -e "Tamanho em caracteres para fatiar cada documento (padrão: 1000)."
+                local novo_size
+                read -p "Digite o novo valor (atual '$CHUNK_SIZE'): " novo_size
+                if [ -n "$novo_size" ]; then
+                    atualizar_configuracao "CHUNK_SIZE" "$novo_size" "$APP_DIR"
+                    exibir_texto_digitando "Tamanho do bloco atualizado para: $novo_size"
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            3)
+                limpar_tela_retro
+                echo -e "${GREEN}Alterar Sobreposição de Bloco (Chunk Overlap)${NC}"
+                echo -e "Sobreposição de caracteres entre blocos para manter o contexto (padrão: 200)."
+                local novo_overlap
+                read -p "Digite o novo valor (atual '$CHUNK_OVERLAP'): " novo_overlap
+                if [ -n "$novo_overlap" ]; then
+                    atualizar_configuracao "CHUNK_OVERLAP" "$novo_overlap" "$APP_DIR"
+                    exibir_texto_digitando "Sobreposição atualizada para: $novo_overlap"
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            4)
+                limpar_tela_retro
+                echo -e "${GREEN}Alterar Tamanho Máximo de Arquivo${NC}"
+                echo -e "Arquivos maiores que este limite serão ignorados na indexação."
+                local novo_max
+                read -p "Digite o tamanho limite em MB (atual '$MAX_FILE_SIZE_MB'): " novo_max
+                if [ -n "$novo_max" ]; then
+                    atualizar_configuracao "MAX_FILE_SIZE_MB" "$novo_max" "$APP_DIR"
+                    exibir_texto_digitando "Tamanho limite atualizado para: $novo_max MB"
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            5)
+                limpar_tela_retro
+                echo -e "${GREEN}Alterar Modelo de Embedding${NC}"
+                echo -e "Modelo usado para calcular os vetores (padrão: nomic-embed-text)."
+                local novo_embed
+                read -p "Digite o nome do novo modelo (atual '$MODELO_EMBEDDING'): " novo_embed
+                if [ -n "$novo_embed" ]; then
+                    atualizar_configuracao "MODELO_EMBEDDING" "$novo_embed" "$APP_DIR"
+                    exibir_texto_digitando "Modelo de embedding atualizado para: $novo_embed"
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            6)
+                break
                 ;;
             *)
                 echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
