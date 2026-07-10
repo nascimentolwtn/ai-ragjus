@@ -8,7 +8,7 @@ O grande diferencial estratégico do produto é a garantia absoluta de privacida
 
 ## 🚀 Instalação Rápida (Comando Único)
 
-Você pode instalar o **AI-RAGJus** diretamente via terminal com o comando abaixo. O instalador verificará os requisitos do sistema, dependências básicas, configurará as pastas locais e baixará os modelos necessários do Ollama de forma automática.
+Você pode instalar o **AI-RAGJus** diretamente via terminal com o comando abaixo. O instalador é interativo e cuidará de todo o processo de forma automatizada e guiada.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/fraconca/ai-ragjus/main/setup.sh | bash
@@ -16,22 +16,27 @@ curl -sSL https://raw.githubusercontent.com/fraconca/ai-ragjus/main/setup.sh | b
 
 ---
 
-## 🛠️ Pré-requisitos de Sistema
+## 🛠️ Pré-requisitos e Instalação Automática
 
-Para rodar 100% offline localmente, a aplicação necessita que você tenha instalado ou instale durante o setup:
+Para funcionar 100% offline localmente, a aplicação necessita das seguintes ferramentas de sistema:
 
-1. **Ollama**: Motor local de modelos de IA.
-   * [Download do Ollama](https://ollama.com)
-2. **Dependências do Terminal** (o script alertará se faltar alguma):
-   * `curl`
-   * `jq` (leitor e manipulador JSON)
-   * `sqlite3` (persistência local)
-   * `pdftotext` (via `poppler-utils` para leitura de PDFs)
-   * `pandoc` (para leitura de arquivos `.docx` e `.pptx`)
+1. **Ollama**: Motor local de modelos de IA (necessário estar instalado e rodando em segundo plano. Baixe em: [ollama.com](https://ollama.com)).
+2. **Dependências CLI**:
+   * `pdftotext` (para extração rápida de textos de PDFs)
+   * `pandoc` (para ler e processar arquivos `.docx` e `.pptx`)
+   * `jq` (manipulador e decodificador JSON)
+   * `sqlite3` (persistência do banco vetorial local)
+
+### 📦 Como funciona a instalação das dependências:
+O instalador (`setup.sh`) realiza uma verificação inteligente do seu ambiente:
+* **Se você já possui as ferramentas instaladas:** O script detecta instantaneamente, **pula esta etapa e não realiza nenhuma readequação, reinstalação ou atualização**, garantindo rapidez.
+* **Se faltar alguma ferramenta:** O script perguntará amigavelmente se deseja que a instalação seja feita de forma automática.
+  * **No macOS:** Se aceito, o script valida e instala o Homebrew (se necessário) e roda `brew install poppler pandoc jq sqlite3` de forma autônoma.
+  * **No Linux / WSL2:** O script instala as ferramentas usando o gerenciador de pacotes nativo `apt-get` (`sudo apt-get install`).
 
 ### Requisitos Mínimos de Hardware:
 * **Memória RAM**: Mínimo de 4GB. (Recomendado 8GB+ para rodar modelos de 7B/8B na velocidade ideal).
-  * O instalador ajusta automaticamente a sugestão do modelo de IA para sistemas com menos de 8GB de RAM.
+  * O instalador valida sua RAM e sugere o melhor modelo de IA para o seu hardware (como `qwen2.5:1.5b` para PCs mais modestos ou `qwen2.5:7b` para configurações mais robustas).
 
 ---
 
@@ -66,7 +71,7 @@ Navegue até a pasta do projeto e inicie a interface de tela verde:
 
 ### Passo 3: Sincronize/Indexe os Documentos
 No menu principal do terminal, selecione a **Opção 2 (Sincronizar / Reindexar Pasta de Documentos)**. O sistema irá:
-1. Ler e extrair o texto limpo de cada arquivo novo ou alterado.
+1. Ler e extrair o texto limpo de cada arquivo novo ou alterado de forma idempotente (baseado no hash do arquivo).
 2. Fatiar o texto em blocos menores (chunks).
 3. Gerar os embeddings locais via Ollama.
 4. Armazenar tudo com segurança no banco SQLite local.
@@ -80,7 +85,7 @@ Selecione a **Opção 1 (Iniciar Busca Jurídica RAG)**. Digite suas dúvidas ju
 
 Você pode editar o arquivo `config.conf` manualmente ou através do menu principal da CLI para ajustar:
 * O modelo de IA local em uso (ex: `qwen2.5:7b`, `llama3:8b`, `qwen2.5:1.5b`).
-* O caminho personalizado da pasta de documentos (caso você já possua um diretório organizado no seu computador).
+* O caminho personalizado da pasta de documentos.
 * O tamanho do fatiamento (`CHUNK_SIZE`) e a sobreposição dos blocos (`CHUNK_OVERLAP`).
 
 ---
