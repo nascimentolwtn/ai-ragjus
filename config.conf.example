@@ -11,7 +11,7 @@ CACHE_DIR="./.cache_vetorial"
 OLLAMA_URL="http://localhost:11434"
 
 # Modelos recomendados e obrigatórios
-MODELO_IA="qwen2.5:7b"
+MODELO_IA="qwen2.5:1.5b"
 MODELO_EMBEDDING="nomic-embed-text"
 
 # Limites do sistema

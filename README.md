@@ -35,8 +35,8 @@ O instalador (`setup.sh`) realiza uma verificação inteligente do seu ambiente:
   * **No Linux / WSL2:** O script instala as ferramentas usando o gerenciador de pacotes nativo `apt-get` (`sudo apt-get install`).
 
 ### Requisitos Mínimos de Hardware:
-* **Memória RAM**: Mínimo de 4GB. (Recomendado 8GB+ para rodar modelos de 7B/8B na velocidade ideal).
-  * O instalador valida sua RAM e sugere o melhor modelo de IA para o seu hardware (como `qwen2.5:1.5b` para PCs mais modestos ou `qwen2.5:7b` para configurações mais robustas).
+* **Memória RAM**: Mínimo de 4GB. (Recomendado 8GB+ para rodar com extrema fluidez).
+  * O instalador recomenda por padrão o modelo leve **`qwen2.5:1.5b`**, garantindo que a aplicação responda de forma ultra rápida e sem travar computadores comuns.
 
 ---
 
@@ -84,7 +84,7 @@ Selecione a **Opção 1 (Iniciar Busca Jurídica RAG)**. Digite suas dúvidas ju
 ## ⚙️ Configurações Personalizadas
 
 Você pode editar o arquivo `config.conf` manualmente ou através do menu principal da CLI para ajustar:
-* O modelo de IA local em uso (ex: `qwen2.5:7b`, `llama3:8b`, `qwen2.5:1.5b`).
+* O modelo de IA local em uso (padrão: `qwen2.5:1.5b` ou outros como `llama3.2:3b`, `qwen2.5:7b`).
 * O caminho personalizado da pasta de documentos.
 * O tamanho do fatiamento (`CHUNK_SIZE`) e a sobreposição dos blocos (`CHUNK_OVERLAP`).
 

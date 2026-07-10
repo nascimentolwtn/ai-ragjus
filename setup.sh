@@ -109,17 +109,15 @@ elif [ "$OS_TYPE" = "Linux" ]; then
 fi
 
 echo -e "Memória RAM detectada: ${BLUE}${RAM_GB} GB${NC}"
-if [ "$RAM_GB" -lt 4 ]; then
-    echo -e "${RED}[AVISO] Seu sistema possui recursos muito limitados (${RAM_GB}GB).${NC}"
-    echo -e "Será obrigatório utilizar modelos ultraleves (ex: qwen2.5:1.5b) para evitar travamentos."
-    MODELO_SUGERIDO="qwen2.5:1.5b"
-elif [ "$RAM_GB" -lt 8 ]; then
-    echo -e "${YELLOW}[AVISO] Memória RAM menor que 8GB (${RAM_GB}GB).${NC}"
-    echo -e "Sugerimos o uso do modelo mais leve para garantir fluidez."
-    MODELO_SUGERIDO="qwen2.5:1.5b"
+# Sugerimos o qwen2.5:1.5b como padrão universal (ocupa apenas 900MB e roda com extrema leveza)
+MODELO_SUGERIDO="qwen2.5:1.5b"
+
+if [ "$RAM_GB" -lt 8 ]; then
+    echo -e "${YELLOW}[AVISO] Seu sistema possui menos de 8GB de RAM (${RAM_GB}GB).${NC}"
+    echo -e "O modelo leve '${MODELO_SUGERIDO}' é ideal para garantir respostas rápidas sem travar seu PC."
 else
-    echo -e "${GREEN}[OK] Recursos de hardware excelentes para o modelo padrão (7B).${NC}"
-    MODELO_SUGERIDO="qwen2.5:7b"
+    echo -e "${GREEN}[OK] Seu sistema possui recursos de hardware adequados.${NC}"
+    echo -e "Como padrão de leveza e rapidez, recomendamos o modelo '${MODELO_SUGERIDO}'."
 fi
 echo ""
 ler_entrada "Pressione [Enter] para prosseguir..."
@@ -344,7 +342,7 @@ mkdir -p src
 if [ ! -f "config.conf" ]; then
     cp config.conf.example config.conf
     # Atualiza as escolhas de modelo no arquivo config.conf gerado
-    sed -i.bak "s/MODELO_IA=\"qwen2.5:7b\"/MODELO_IA=\"$MODELO_IA_ATIVO\"/" config.conf && rm -f config.conf.bak
+    sed -i.bak "s/MODELO_IA=\"qwen2.5:1.5b\"/MODELO_IA=\"$MODELO_IA_ATIVO\"/" config.conf && rm -f config.conf.bak
     echo -e "${GREEN}[OK] Arquivo config.conf configurado com suas escolhas.${NC}"
 else
     echo -e "${YELLOW}[INFO] Arquivo config.conf existente. Nenhuma variável foi sobrescrita.${NC}"
