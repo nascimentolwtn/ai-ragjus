@@ -52,8 +52,8 @@ perguntar_ollama() {
     local tmp_err
     tmp_err=$(mktemp 2>/dev/null || echo "/tmp/ollama_err.txt")
 
-    # Executa a chamada em streaming e processa linha a linha
-    while IFS= read -r line; do
+    # Executa a chamada em streaming e processa linha a linha (suporta EOF sem newline)
+    while IFS= read -r line || [ -n "$line" ]; do
         if [ -n "$line" ]; then
             # Verifica se há mensagem de erro no JSON retornado
             local erro
