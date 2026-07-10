@@ -144,63 +144,101 @@ if ! curl -s --connect-timeout 2 "$OLLAMA_HOST" &> /dev/null; then
 fi
 echo -e "${GREEN}[OK] Conexão com o Ollama estabelecida com sucesso!${NC}"
 
-# 5. Download seletivo e guiado de modelos
+# 5. Configuração e Confirmação de Downloads de Modelos
 MODELOS_INSTALADOS=$(curl -s "$OLLAMA_HOST/api/tags" | jq -r '.models[].name' 2>/dev/null || echo "")
 
 echo -e "\n${BLUE}Verificando modelos locais instalados no seu Ollama...${NC}"
 echo -e "-------------------------------------------------------------------------"
-echo "$MODELOS_INSTALADOS" | sed 's/^/  - /'
+if [ -z "$MODELOS_INSTALADOS" ]; then
+    echo "  (Nenhum modelo encontrado no Ollama local)"
+else
+    echo "$MODELOS_INSTALADOS" | sed 's/^/  - /'
+fi
 echo -e "-------------------------------------------------------------------------"
 
+DOWNLOAD_EMBED=false
+DOWNLOAD_IA=false
 MODELO_IA_ATIVO="$MODELO_SUGERIDO"
 MODELO_EMBEDDING_ATIVO="nomic-embed-text"
 
-# 5.1 Embedding Model
+# 5.1 Validação do Modelo de Embedding (nomic-embed-text)
 if echo "$MODELOS_INSTALADOS" | grep -q "nomic-embed-text"; then
-    echo -e "${GREEN}[OK] Modelo de embedding 'nomic-embed-text' já está instalado.${NC}"
+    EMBED_STATUS="${GREEN}[MANTIDO] nomic-embed-text (já instalado no seu computador)${NC}"
 else
-    echo -e "\n${YELLOW}O modelo de embedding 'nomic-embed-text' (obrigatório para busca vetorial) não está instalado.${NC}"
-    read -p "Deseja realizar o download dele agora? (~270MB) (s/n): " pull_embed
+    echo -e "\n${YELLOW}[AVISO] O modelo de embedding 'nomic-embed-text' (obrigatório para indexação e busca vetorial) não foi encontrado.${NC}"
+    read -p "Deseja agendar o download deste modelo? (~270MB) (s/n): " pull_embed
     if [ "$pull_embed" = "s" ] || [ "$pull_embed" = "S" ]; then
-        echo -e "${BLUE}Baixando nomic-embed-text...${NC}"
-        curl -d '{"name": "nomic-embed-text"}' "$OLLAMA_HOST/api/pull"
-        echo -e "\n${GREEN}[OK] Download concluído!${NC}"
+        DOWNLOAD_EMBED=true
+        EMBED_STATUS="${YELLOW}[DOWNLOAD] nomic-embed-text (~270MB)${NC}"
     else
-        echo -e "${RED}[AVISO] O sistema pode falhar na indexação se o modelo de embedding não for instalado posteriormente.${NC}"
+        EMBED_STATUS="${RED}[PULADO] nomic-embed-text (o sistema não funcionará sem este modelo)${NC}"
     fi
 fi
 
-# 5.2 Inference Model
+# 5.2 Validação do Modelo Lógico (Inference)
 if echo "$MODELOS_INSTALADOS" | grep -q "$MODELO_SUGERIDO"; then
-    echo -e "${GREEN}[OK] Modelo lógico sugerido '$MODELO_SUGERIDO' já está instalado.${NC}"
+    IA_STATUS="${GREEN}[MANTIDO] $MODELO_SUGERIDO (já instalado no seu computador)${NC}"
     MODELO_IA_ATIVO="$MODELO_SUGERIDO"
 else
-    echo -e "\n${YELLOW}O modelo lógico sugerido para o seu hardware é o '${MODELO_SUGERIDO}'.${NC}"
-    read -p "Deseja realizar o download dele agora? (s/n): " pull_logic
+    echo -e "\n${YELLOW}[INFO] O modelo lógico recomendado para seu hardware é '$MODELO_SUGERIDO' (não instalado).${NC}"
+    read -p "Deseja agendar o download deste modelo? (s/n): " pull_logic
     
     if [ "$pull_logic" = "s" ] || [ "$pull_logic" = "S" ]; then
-        echo -e "${BLUE}Baixando $MODELO_SUGERIDO...${NC}"
-        curl -d "{\"name\": \"$MODELO_SUGERIDO\"}" "$OLLAMA_HOST/api/pull"
-        echo -e "\n${GREEN}[OK] Download concluído!${NC}"
+        DOWNLOAD_IA=true
+        IA_STATUS="${YELLOW}[DOWNLOAD] $MODELO_SUGERIDO (~4.7GB)${NC}"
         MODELO_IA_ATIVO="$MODELO_SUGERIDO"
     else
         read -p "Gostaria de informar o nome de outro modelo já instalado em seu PC para usar como padrão? (s/n): " usar_outro
         if [ "$usar_outro" = "s" ] || [ "$usar_outro" = "S" ]; then
-            echo -e "Modelos locais disponíveis:"
+            echo -e "Modelos locais disponíveis no seu computador:"
             echo "$MODELOS_INSTALADOS" | sed 's/^/  - /'
-            read -p "Digite o nome exato do modelo: " modelo_usuario
+            read -p "Digite o nome exato do modelo selecionado: " modelo_usuario
             if [ -n "$modelo_usuario" ]; then
                 MODELO_IA_ATIVO="$modelo_usuario"
-                echo -e "${GREEN}[OK] Modelo padrão definido para: $MODELO_IA_ATIVO${NC}"
+                IA_STATUS="${GREEN}[MANTIDO] $MODELO_IA_ATIVO (definido pelo usuário)${NC}"
+            else
+                IA_STATUS="${RED}[PULADO] Nenhum modelo lógico definido (configure em config.conf)${NC}"
             fi
         else
-            echo -e "${RED}[AVISO] Lembre-se de definir o modelo correto no menu ou no arquivo config.conf antes de rodar o chat.${NC}"
+            IA_STATUS="${RED}[PULADO] Nenhum modelo lógico definido (configure em config.conf)${NC}"
         fi
     fi
 fi
 
+# 5.3 Exibição do Resumo e Confirmação de Execução
+limpar_tela
+echo -e "${GREEN_BOLD}=========================================================================${NC}"
+echo -e "${GREEN_BOLD}             RESUMO DE AÇÕES DO OLLAMA - CONFIRMAÇÃO FINAL               ${NC}"
+echo -e "${GREEN_BOLD}=========================================================================${NC}"
+echo -e "  1. Indexador Vetorial (Embedding) :"
+echo -e "     $EMBED_STATUS"
+echo -e "  2. Cérebro de IA (Lógico/Chat)     :"
+echo -e "     $IA_STATUS"
+echo -e "${GREEN_BOLD}=========================================================================${NC}"
 echo ""
-read -p "Pressione [Enter] para concluir a configuração final..."
+
+read -p "Deseja prosseguir e aplicar as ações acima? (s/n): " confirmar_acoes
+if [ "$confirmar_acoes" != "s" ] && [ "$confirmar_acoes" != "S" ]; then
+    echo -e "\n${RED}[CANCELADO] Nenhum modelo foi baixado ou alterado.${NC}"
+    DOWNLOAD_EMBED=false
+    DOWNLOAD_IA=false
+fi
+
+# Executa os downloads programados
+if [ "$DOWNLOAD_EMBED" = true ]; then
+    echo -e "\n${BLUE}Iniciando download do modelo nomic-embed-text...${NC}"
+    curl -d '{"name": "nomic-embed-text"}' "$OLLAMA_HOST/api/pull"
+    echo -e "\n${GREEN}[OK] nomic-embed-text instalado.${NC}"
+fi
+
+if [ "$DOWNLOAD_IA" = true ]; then
+    echo -e "\n${BLUE}Iniciando download do modelo $MODELO_IA_ATIVO...${NC}"
+    curl -d "{\"name\": \"$MODELO_IA_ATIVO\"}" "$OLLAMA_HOST/api/pull"
+    echo -e "\n${GREEN}[OK] $MODELO_IA_ATIVO instalado.${NC}"
+fi
+
+echo ""
+read -p "Pressione [Enter] para concluir as configurações de arquivos..."
 
 # 6. Organização de pastas e salvamento
 limpar_tela
