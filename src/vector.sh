@@ -74,7 +74,7 @@ salvar_bloco_vetorial() {
 # Retorna um array JSON contendo os 3 trechos de texto mais semelhantes
 buscar_trechos_relevantes() {
     local vetor_pergunta="$1"
-    local limite=3
+    local limite=10
     local db_path
     db_path=$(obter_db_path)
 

@@ -77,6 +77,13 @@ menu_principal() {
                     local trechos
                     trechos=$(buscar_trechos_relevantes "$vetor_query" 2>/dev/null || echo "[]")
                     
+                    # Exibe fontes localizadas para transparência de RAG
+                    local fontes
+                    fontes=$(echo "$trechos" | jq -r '.[] | .caminho' 2>/dev/null | awk -F/ '{print $NF}' | sort -u | paste -sd ", " - || echo "")
+                    if [ -n "$fontes" ]; then
+                        echo -e "${BLUE}[Fontes lidas: $fontes]${NC}"
+                    fi
+                    
                     # 3. Formata contexto
                     local contexto
                     contexto=$(echo "$trechos" | jq -r '.[] | "Arquivo: " + .caminho + "\nTrecho: " + .texto + "\n---"' 2>/dev/null || echo "")
