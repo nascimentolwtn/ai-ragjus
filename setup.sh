@@ -118,7 +118,7 @@ while true; do
             break
         fi
         echo -e "\n${BLUE}Reavaliando dependências do sistema... Aguarde...${NC}"
-        sleep 1.5
+        sleep 1 || true
     else
         echo -e "${GREEN}[OK] Todas as ferramentas CLI básicas estão instaladas com sucesso!${NC}"
         echo ""
