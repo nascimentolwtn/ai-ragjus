@@ -17,6 +17,7 @@ carregar_configuracoes() {
     MAX_FILE_SIZE_MB=50
     CHUNK_SIZE=1000
     CHUNK_OVERLAP=200
+    TEMPERATURA=0
 
     if [ -f "$config_file" ]; then
         # Lê linha a linha para carregar apenas variáveis bem formatadas e evitar execução de código arbitrário
@@ -38,12 +39,13 @@ carregar_configuracoes() {
                 MAX_FILE_SIZE_MB) MAX_FILE_SIZE_MB="$value" ;;
                 CHUNK_SIZE) CHUNK_SIZE="$value" ;;
                 CHUNK_OVERLAP) CHUNK_OVERLAP="$value" ;;
+                TEMPERATURA) TEMPERATURA="$value" ;;
             esac
         done < "$config_file"
     fi
     
     # Exporta para os outros scripts
-    export PASTA_ALVO CACHE_DIR OLLAMA_URL MODELO_IA MODELO_EMBEDDING MAX_FILE_SIZE_MB CHUNK_SIZE CHUNK_OVERLAP
+    export PASTA_ALVO CACHE_DIR OLLAMA_URL MODELO_IA MODELO_EMBEDDING MAX_FILE_SIZE_MB CHUNK_SIZE CHUNK_OVERLAP TEMPERATURA
 }
 
 # Atualiza uma chave de configuração no config.conf
@@ -67,6 +69,7 @@ atualizar_configuracao() {
         MAX_FILE_SIZE_MB) MAX_FILE_SIZE_MB="$valor" ;;
         CHUNK_SIZE) CHUNK_SIZE="$valor" ;;
         CHUNK_OVERLAP) CHUNK_OVERLAP="$valor" ;;
+        TEMPERATURA) TEMPERATURA="$valor" ;;
     esac
 
     # Atualiza ou adiciona a linha no arquivo
