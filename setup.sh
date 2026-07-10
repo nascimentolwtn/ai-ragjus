@@ -45,7 +45,7 @@ echo -e "    dependências de sistema sejam instaladas a partir de fontes segura
 echo -e "${GREEN_BOLD}=========================================================================${NC}"
 echo ""
 
-read -p "Você leu, concorda com os termos de privacidade local e deseja continuar? (s/n): " termo_aceito
+read -p "Você leu, concorda com os termos de privacidade local e deseja continuar? (s/n): " termo_aceito < /dev/tty
 if [ "$termo_aceito" != "s" ] && [ "$termo_aceito" != "S" ]; then
     echo -e "\n${RED}Instalação cancelada. O AI-RAGJus requer a aceitação dos termos para continuar.${NC}"
     exit 0
@@ -83,7 +83,7 @@ else
     MODELO_SUGERIDO="qwen2.5:7b"
 fi
 echo ""
-read -p "Pressione [Enter] para prosseguir..."
+read -p "Pressione [Enter] para prosseguir..." < /dev/tty
 
 # 3. Verificação de Dependências Básicas
 while true; do
@@ -112,14 +112,14 @@ while true; do
             echo -e "     ${GREEN_BOLD}sudo apt-get update && sudo apt-get install -y poppler-utils pandoc jq sqlite3${NC}"
         fi
         echo ""
-        read -p "Pressione [Enter] para reavaliar as dependências ou digite 'c' para tentar ignorar: " acao_dep
+        read -p "Pressione [Enter] para reavaliar as dependências ou digite 'c' para tentar ignorar: " acao_dep < /dev/tty
         if [ "$acao_dep" = "c" ] || [ "$acao_dep" = "C" ]; then
             break
         fi
     else
         echo -e "${GREEN}[OK] Todas as ferramentas CLI básicas estão instaladas com sucesso!${NC}"
         echo ""
-        read -p "Pressione [Enter] para prosseguir..."
+        read -p "Pressione [Enter] para prosseguir..." < /dev/tty
         break
     fi
 done
@@ -136,7 +136,7 @@ if ! curl -s --connect-timeout 2 "$OLLAMA_HOST" &> /dev/null; then
     echo -e "Por favor, abra o aplicativo do Ollama na sua máquina antes de continuar."
     echo -e "Se você não tem o Ollama instalado, baixe-o em: https://ollama.com"
     echo ""
-    read -p "Pressione [Enter] após iniciar o Ollama para tentar novamente..."
+    read -p "Pressione [Enter] após iniciar o Ollama para tentar novamente..." < /dev/tty
     if ! curl -s --connect-timeout 2 "$OLLAMA_HOST" &> /dev/null; then
         echo -e "${RED}[FALHA] Ollama continua inacessível. O instalador será encerrado.${NC}"
         exit 1
@@ -166,7 +166,7 @@ if echo "$MODELOS_INSTALADOS" | grep -q "nomic-embed-text"; then
     EMBED_STATUS="${GREEN}[MANTIDO] nomic-embed-text (já instalado no seu computador)${NC}"
 else
     echo -e "\n${YELLOW}[AVISO] O modelo de embedding 'nomic-embed-text' (obrigatório para indexação e busca vetorial) não foi encontrado.${NC}"
-    read -p "Deseja agendar o download deste modelo? (~270MB) (s/n): " pull_embed
+    read -p "Deseja agendar o download deste modelo? (~270MB) (s/n): " pull_embed < /dev/tty
     if [ "$pull_embed" = "s" ] || [ "$pull_embed" = "S" ]; then
         DOWNLOAD_EMBED=true
         EMBED_STATUS="${YELLOW}[DOWNLOAD] nomic-embed-text (~270MB)${NC}"
@@ -181,18 +181,18 @@ if echo "$MODELOS_INSTALADOS" | grep -q "$MODELO_SUGERIDO"; then
     MODELO_IA_ATIVO="$MODELO_SUGERIDO"
 else
     echo -e "\n${YELLOW}[INFO] O modelo lógico recomendado para seu hardware é '$MODELO_SUGERIDO' (não instalado).${NC}"
-    read -p "Deseja agendar o download deste modelo? (s/n): " pull_logic
+    read -p "Deseja agendar o download deste modelo? (s/n): " pull_logic < /dev/tty
     
     if [ "$pull_logic" = "s" ] || [ "$pull_logic" = "S" ]; then
         DOWNLOAD_IA=true
         IA_STATUS="${YELLOW}[DOWNLOAD] $MODELO_SUGERIDO (~4.7GB)${NC}"
         MODELO_IA_ATIVO="$MODELO_SUGERIDO"
     else
-        read -p "Gostaria de informar o nome de outro modelo já instalado em seu PC para usar como padrão? (s/n): " usar_outro
+        read -p "Gostaria de informar o nome de outro modelo já instalado em seu PC para usar como padrão? (s/n): " usar_outro < /dev/tty
         if [ "$usar_outro" = "s" ] || [ "$usar_outro" = "S" ]; then
             echo -e "Modelos locais disponíveis no seu computador:"
             echo "$MODELOS_INSTALADOS" | sed 's/^/  - /'
-            read -p "Digite o nome exato do modelo selecionado: " modelo_usuario
+            read -p "Digite o nome exato do modelo selecionado: " modelo_usuario < /dev/tty
             if [ -n "$modelo_usuario" ]; then
                 MODELO_IA_ATIVO="$modelo_usuario"
                 IA_STATUS="${GREEN}[MANTIDO] $MODELO_IA_ATIVO (definido pelo usuário)${NC}"
@@ -217,7 +217,7 @@ echo -e "     $IA_STATUS"
 echo -e "${GREEN_BOLD}=========================================================================${NC}"
 echo ""
 
-read -p "Deseja prosseguir e aplicar as ações acima? (s/n): " confirmar_acoes
+read -p "Deseja prosseguir e aplicar as ações acima? (s/n): " confirmar_acoes < /dev/tty
 if [ "$confirmar_acoes" != "s" ] && [ "$confirmar_acoes" != "S" ]; then
     echo -e "\n${RED}[CANCELADO] Nenhum modelo foi baixado ou alterado.${NC}"
     DOWNLOAD_EMBED=false
@@ -238,7 +238,7 @@ if [ "$DOWNLOAD_IA" = true ]; then
 fi
 
 echo ""
-read -p "Pressione [Enter] para concluir as configurações de arquivos..."
+read -p "Pressione [Enter] para concluir as configurações de arquivos..." < /dev/tty
 
 # 6. Organização de pastas e salvamento
 limpar_tela
