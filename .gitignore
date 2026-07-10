@@ -20,3 +20,5 @@ node_modules/\n.env\n.DS_Store
 # DB
 .cache_vetorial/rag_store.db
 *.db
+/.cache_vetorial
+*.db
