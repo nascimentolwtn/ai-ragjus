@@ -3,9 +3,11 @@
 .env.local
 .env.example
 .env.*.local
+
 /docs/contratos/
 /docs/leis/
 /docs/processos/
+
 /.cache_vetorial
 /.cache_vetorial/rag_store.db
 *.db
