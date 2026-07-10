@@ -26,7 +26,7 @@ fi
 
 # 1. Termos e Condições / Disclaimer de Privacidade
 limpar_tela() {
-    if command -v tput &> /dev/null; then tput clear; else echo -ne "\033[H\033[2J"; fi
+    clear 2>/dev/null || echo -ne "\033[H\033[2J"
 }
 
 limpar_tela
