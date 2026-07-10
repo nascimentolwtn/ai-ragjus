@@ -15,3 +15,5 @@ node_modules/\n.env\n.DS_Store
 docs/contratos/
 docs/leis/
 docs/processos/
+.cache_vetorial/rag_store.db
+.cache_vetorial/rag_store.db
