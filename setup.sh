@@ -138,9 +138,58 @@ while true; do
         fi
     done
 
+    instalar_dependencias_automatico() {
+        echo -e "\n${BLUE}Iniciando a instalação automática das dependências...${NC}"
+        if [ "$OS_TYPE" = "Darwin" ]; then
+            # Verifica se o Homebrew está instalado
+            if ! command -v brew &> /dev/null; then
+                echo -e "${YELLOW}Homebrew (gerenciador de pacotes) não foi detectado em seu Mac.${NC}"
+                echo -e "O Homebrew é necessário para baixar ferramentas adicionais no macOS de forma segura."
+                ler_entrada "Deseja que eu instale o Homebrew automaticamente agora? (s/n): " instalar_brew
+                if [ "$instalar_brew" = "s" ] || [ "$instalar_brew" = "S" ]; then
+                    echo -e "${BLUE}Baixando e instalando o Homebrew... (Isso pode solicitar confirmações no terminal)${NC}"
+                    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                    # Configura as variáveis do brew na sessão atual
+                    if [ -f "/opt/homebrew/bin/brew" ]; then
+                        eval "$(/opt/homebrew/bin/brew shellenv)"
+                    elif [ -f "/usr/local/bin/brew" ]; then
+                        eval "$(/usr/local/bin/brew shellenv)"
+                    fi
+                else
+                    echo -e "${RED}Instalação do Homebrew recusada. Por favor, instale as ferramentas manualmente.${NC}"
+                    return 1
+                fi
+            fi
+
+            # Instala os pacotes
+            echo -e "${BLUE}Executando 'brew install poppler pandoc jq sqlite3'...${NC}"
+            brew install poppler pandoc jq sqlite3
+            echo -e "${GREEN}[OK] Dependências instaladas com sucesso via Homebrew!${NC}"
+        else
+            # Linux / WSL2
+            echo -e "${BLUE}Instalando poppler-utils, pandoc, jq e sqlite3 via apt-get...${NC}"
+            echo -e "${YELLOW}(Será solicitada sua senha 'sudo' do Linux/WSL2 para permissão de instalação)${NC}"
+            sudo apt-get update && sudo apt-get install -y poppler-utils pandoc jq sqlite3
+            echo -e "${GREEN}[OK] Dependências instaladas com sucesso via apt-get!${NC}"
+        fi
+    }
+
     if [ ${#MISSING_DEPS[@]} -ne 0 ]; then
         echo -e "${YELLOW}[AVISO] Ferramentas essenciais ausentes: ${MISSING_DEPS[*]}${NC}"
-        echo -e "Para que o leitor de PDF/Word e banco de dados funcionem, instale-os antes de continuar:"
+        echo -e "Estas ferramentas servem para extrair o texto limpo de arquivos PDF/Word/PPTX localmente."
+        echo ""
+        
+        ler_entrada "Deseja que o AI-RAGJus tente instalar estas ferramentas automaticamente para você? (s/n): " auto_instalar
+        if [ "$auto_instalar" = "s" ] || [ "$auto_instalar" = "S" ]; then
+            if instalar_dependencias_automatico; then
+                echo -e "\n${BLUE}Reavaliando dependências instaladas...${NC}"
+                sleep 1
+                continue
+            fi
+        fi
+
+        echo -e "\n-------------------------------------------------------------------------"
+        echo -e "Caso prefira instalar manualmente no seu terminal, siga estas instruções:"
         if [ "$OS_TYPE" = "Darwin" ]; then
             echo -e "  -> No macOS (via Homebrew):"
             echo -e "     ${GREEN_BOLD}brew install poppler pandoc jq sqlite3${NC}"
@@ -148,13 +197,13 @@ while true; do
             echo -e "  -> No Linux/WSL (Debian/Ubuntu):"
             echo -e "     ${GREEN_BOLD}sudo apt-get update && sudo apt-get install -y poppler-utils pandoc jq sqlite3${NC}"
         fi
-        echo -e "${YELLOW}(Se você não instalar as ferramentas, esta tela continuará reaparecendo ao apertar Enter)${NC}"
+        echo -e "-------------------------------------------------------------------------"
+        echo -e "${YELLOW}(Se as dependências não forem resolvidas, esta tela continuará reaparecendo)${NC}"
         echo ""
         ler_entrada "Pressione [Enter] para reavaliar as dependências ou digite 'c' para ignorar e continuar: " acao_dep
         if [ "$acao_dep" = "c" ] || [ "$acao_dep" = "C" ]; then
             break
         fi
-        echo -e "\n${BLUE}Reavaliando dependências do sistema... Aguarde...${NC}"
         sleep 1 || true
     else
         echo -e "${GREEN}[OK] Todas as ferramentas CLI básicas estão instaladas com sucesso!${NC}"
