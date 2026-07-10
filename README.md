@@ -1,9 +1,93 @@
-# AI-RAGJus
+# ⚖️ AI-RAGJus
 
-Este projeto consiste no desenvolvimento de uma aplicação de linha de comando (CLI) open-source voltada para o mercado jurídico, projetada especificamente para operar em regime de total isolamento de rede (100% offline e air-gapped). O sistema adota uma estética clássica de terminal retrô (estilo "tela verde") e roda de forma contínua e ininterrupta em ambientes baseados em Unix e no subsistema Windows para Linux (WSL2). O grande diferencial estratégico do produto é a garantia absoluta de privacidade de dados sensíveis — como peças processuais, contratos confidenciais e segredos de justiça —, processando todas as informações diretamente no hardware local do escritório, sem trafegar dados por nuvens ou APIs de terceiros.
+Este projeto consiste no desenvolvimento de uma aplicação de linha de comando (CLI) open-source voltada para o mercado jurídico, projetada especificamente para operar em regime de total isolamento de rede (100% offline e air-gapped). O sistema adota uma estética clássica de terminal retrô (estilo "tela verde") e roda de forma contínua e ininterrupta em ambientes baseados em Unix e no subsistema Windows para Linux (WSL2).
 
-A arquitetura do ecossistema é orquestrada por scripts em Bash, que gerenciam a interface do usuário e o fluxo de controle, delegando as operações pesadas a binários nativos de alta performance compilados em C, Rust ou Go. O funcionamento baseia-se no padrão LIG (Leitura, Indexação e Geração) estruturado em três etapas consecutivas. Na fase de leitura e ingestão, utilitários de alta velocidade como o pdftotext e o pandoc varrem uma pasta alvo configurada pelo advogado, extraindo instantaneamente o texto limpo de arquivos PDF, DOCX e PPTX. Para evitar o reprocessamento desnecessário de arquivos grandes, o script implementa um mecanismo de cache idempotente baseado em hashes criptográficos, dividindo o texto extraído em blocos menores (chunks) otimizados para a memória RAM local.
+O grande diferencial estratégico do produto é a garantia absoluta de privacidade de dados sensíveis — como peças processuais, contratos confidenciais e segredos de justiça —, processando todas as informações diretamente no hardware local do escritório, sem trafegar dados por nuvens ou APIs de terceiros.
 
-Na etapa de indexação e busca semântica, o sistema utiliza o Ollama local com um modelo de embeddings especializado (como o nomic-embed-text) para converter os blocos de texto em vetores matemáticos que representam o significado das leis e dos casos. Esses vetores são armazenados em um banco de dados leve embarcado em SQLite. Quando o advogado interage com o terminal e digita uma dúvida jurídica em linguagem natural, o motor de busca CLI calcula a similaridade por cosseno em milissegundos, localizando os trechos mais relevantes do acervo do escritório sem a necessidade de uma infraestrutura de nuvem pesada.
+---
 
-Por fim, na etapa de geração, a aplicação monta um prompt contextualizado que injeta os fragmentos dos documentos reais localizados como a única "fonte da verdade". Esse prompt é enviado por meio de requisições HTTP locais via curl e jq para a API do Ollama, que executa um modelo de linguagem focado em raciocínio lógico (como o qwen2.5:7b ou llama3:8b). O modelo processa a resposta de forma estritamente contextualizada e o script a exibe na tela verde simulando o efeito de digitação clássico. Toda a robustez e estabilidade do fluxo de desenvolvimento são asseguradas por testes automatizados em bats-core, garantindo que o ciclo contínuo de automação permaneça resiliente, modular e à prova de vazamento de dados.
+## 🚀 Instalação Rápida (Comando Único)
+
+Você pode instalar o **AI-RAGJus** diretamente via terminal com o comando abaixo. O instalador verificará os requisitos do sistema, dependências básicas, configurará as pastas locais e baixará os modelos necessários do Ollama de forma automática.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/fraconca/ai-ragjus/main/setup.sh | bash
+```
+
+---
+
+## 🛠️ Pré-requisitos de Sistema
+
+Para rodar 100% offline localmente, a aplicação necessita que você tenha instalado ou instale durante o setup:
+
+1. **Ollama**: Motor local de modelos de IA.
+   * [Download do Ollama](https://ollama.com)
+2. **Dependências do Terminal** (o script alertará se faltar alguma):
+   * `curl`
+   * `jq` (leitor e manipulador JSON)
+   * `sqlite3` (persistência local)
+   * `pdftotext` (via `poppler-utils` para leitura de PDFs)
+   * `pandoc` (para leitura de arquivos `.docx` e `.pptx`)
+
+### Requisitos Mínimos de Hardware:
+* **Memória RAM**: Mínimo de 4GB. (Recomendado 8GB+ para rodar modelos de 7B/8B na velocidade ideal).
+  * O instalador ajusta automaticamente a sugestão do modelo de IA para sistemas com menos de 8GB de RAM.
+
+---
+
+## 📂 Estrutura de Pastas Criada
+
+Após a instalação, a estrutura do seu projeto será organizada da seguinte forma:
+
+```
+ai-ragjus/
+├── jus.sh                  # Aplicativo maestro principal (a interface de tela verde)
+├── setup.sh                # Script de provisionamento e dependências
+├── config.conf             # Configurações ativas (modelo, pasta alvo, etc.)
+├── docs/                   # Insira seus documentos jurídicos aqui
+│   ├── contratos/
+│   ├── leis/
+│   └── processos/
+└── .cache_vetorial/        # Banco de dados SQLite local e caches (oculto)
+```
+
+---
+
+## 📖 Como Usar (Passo a Passo)
+
+### Passo 1: Coloque seus documentos na pasta `docs`
+Mova ou copie seus arquivos nos formatos suportados (`.pdf`, `.docx`, `.pptx`, `.txt`, `.md`, `.csv`) para dentro do diretório correspondente criado em `docs/`.
+
+### Passo 2: Inicie o Aplicativo
+Navegue até a pasta do projeto e inicie a interface de tela verde:
+```bash
+./jus.sh
+```
+
+### Passo 3: Sincronize/Indexe os Documentos
+No menu principal do terminal, selecione a **Opção 2 (Sincronizar / Reindexar Pasta de Documentos)**. O sistema irá:
+1. Ler e extrair o texto limpo de cada arquivo novo ou alterado.
+2. Fatiar o texto em blocos menores (chunks).
+3. Gerar os embeddings locais via Ollama.
+4. Armazenar tudo com segurança no banco SQLite local.
+
+### Passo 4: Comece a Perguntar (Chat RAG)
+Selecione a **Opção 1 (Iniciar Busca Jurídica RAG)**. Digite suas dúvidas jurídicas em linguagem natural. A IA buscará os trechos mais relevantes do seu acervo no banco SQLite, montará o contexto local e responderá na hora de forma estruturada, informando os arquivos de origem.
+
+---
+
+## ⚙️ Configurações Personalizadas
+
+Você pode editar o arquivo `config.conf` manualmente ou através do menu principal da CLI para ajustar:
+* O modelo de IA local em uso (ex: `qwen2.5:7b`, `llama3:8b`, `qwen2.5:1.5b`).
+* O caminho personalizado da pasta de documentos (caso você já possua um diretório organizado no seu computador).
+* O tamanho do fatiamento (`CHUNK_SIZE`) e a sobreposição dos blocos (`CHUNK_OVERLAP`).
+
+---
+
+## 🔒 Segurança e Privacidade (Air-Gapped por Padrão)
+
+A aplicação foi desenvolvida sob a filosofia de privacidade estrita. 
+* Não são feitas chamadas de API externas após a fase de setup.
+* Toda a indexação matemática e inferência lógica de linguagem ocorre em sua máquina local.
+* Ideal para ambientes restritos e conformidade com a LGPD e o segredo de justiça.
