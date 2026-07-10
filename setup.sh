@@ -111,11 +111,14 @@ while true; do
             echo -e "  -> No Linux/WSL (Debian/Ubuntu):"
             echo -e "     ${GREEN_BOLD}sudo apt-get update && sudo apt-get install -y poppler-utils pandoc jq sqlite3${NC}"
         fi
+        echo -e "${YELLOW}(Se você não instalar as ferramentas, esta tela continuará reaparecendo ao apertar Enter)${NC}"
         echo ""
-        read -p "Pressione [Enter] para reavaliar as dependências ou digite 'c' para tentar ignorar: " acao_dep < /dev/tty
+        read -p "Pressione [Enter] para reavaliar as dependências ou digite 'c' para ignorar e continuar: " acao_dep < /dev/tty
         if [ "$acao_dep" = "c" ] || [ "$acao_dep" = "C" ]; then
             break
         fi
+        echo -e "\n${BLUE}Reavaliando dependências do sistema... Aguarde...${NC}"
+        sleep 1.5
     else
         echo -e "${GREEN}[OK] Todas as ferramentas CLI básicas estão instaladas com sucesso!${NC}"
         echo ""
