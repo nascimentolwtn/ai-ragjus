@@ -3,6 +3,12 @@
 .env.local
 .env.example
 .env.*.local
+/docs/contratos/
+/docs/leis/
+/docs/processos/
+/.cache_vetorial
+/.cache_vetorial/rag_store.db
+*.db
 
 # OS files
 .DS_Store
@@ -10,11 +16,3 @@ Thumbs.db
 
 # Stack-specific ignores
 node_modules/\n.env\n.DS_Store
-
-#Docs
-docs/contratos/
-docs/leis/
-docs/processos/
-.cache_vetorial/
-.cache_vetorial/rag_store.db
-*.db
