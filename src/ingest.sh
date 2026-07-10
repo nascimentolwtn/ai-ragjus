@@ -56,6 +56,33 @@ fatiar_texto() {
         '
 }
 
+# Compara os arquivos cadastrados no banco SQLite com o disco e remove registros órfãos
+remover_arquivos_deletados_do_banco() {
+    local db_path
+    db_path=$(obter_db_path)
+
+    if [ ! -f "$db_path" ]; then
+        return
+    fi
+
+    # Busca os caminhos de arquivos únicos registrados no SQLite
+    local arquivos_registrados
+    arquivos_registrados=$(sqlite3 "$db_path" "SELECT DISTINCT caminho_arquivo FROM document_chunks;" 2>/dev/null || echo "")
+
+    if [ -n "$arquivos_registrados" ]; then
+        # Lê linha a linha de forma resiliente
+        echo "$arquivos_registrados" | while IFS= read -r arquivo_db || [ -n "$arquivo_db" ]; do
+            if [ -n "$arquivo_db" ]; then
+                # Se o arquivo não existir fisicamente no disco, limpa sua indexação do banco
+                if [ ! -f "$arquivo_db" ]; then
+                    echo -e "${YELLOW}  [Limpeza] Removendo registros de arquivo excluído do disco: $arquivo_db${NC}"
+                    limpar_registros_arquivo "$arquivo_db"
+                fi
+            fi
+        done
+    fi
+}
+
 # Varre a pasta de documentos, verifica modificações via hashes e processa arquivos
 sincronizar_documentos() {
     local pasta_alvo="$PASTA_ALVO"
@@ -72,6 +99,9 @@ sincronizar_documentos() {
 
     # Inicializa banco SQLite (se necessário)
     inicializar_banco_vetorial
+
+    # Executa a limpeza de arquivos órfãos (excluídos do disco) antes de indexar novos
+    remover_arquivos_deletados_do_banco
 
     # Varre a pasta recursivamente procurando arquivos suportados
     # Ignora arquivos ocultos ou temporários (~$)
