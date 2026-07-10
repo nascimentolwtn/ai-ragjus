@@ -10,3 +10,8 @@ Thumbs.db
 
 # Stack-specific ignores
 node_modules/\n.env\n.DS_Store
+
+#Docs
+docs/contratos/
+docs/leis/
+docs/processos/
