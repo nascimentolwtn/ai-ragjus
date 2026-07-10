@@ -45,7 +45,7 @@ perguntar_ollama() {
     fi
 
     local json_payload
-    json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$prompt" --bool stream true '{"model": $model, "prompt": $prompt, "stream": $stream}')
+    json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$prompt" '{"model": $model, "prompt": $prompt, "stream": true}')
 
     # Executa a chamada em streaming
     # Cada bloco de resposta é impresso no terminal imediatamente à medida que chega

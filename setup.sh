@@ -19,6 +19,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # Sem Cor
 
 # Detecção de execução externa (ex: curl -sSL ... | bash)
+CLONED=false
 if [ ! -f "jus.sh" ]; then
     echo -e "${YELLOW}[INFO] Script executado externamente. Configurando o ambiente de trabalho...${NC}"
     if ! command -v git &> /dev/null; then
@@ -28,6 +29,7 @@ if [ ! -f "jus.sh" ]; then
     echo -e "${BLUE}Clonando o repositório 'ai-ragjus' no diretório atual...${NC}"
     git clone https://github.com/fraconca/ai-ragjus.git
     cd ai-ragjus
+    CLONED=true
 fi
 
 # Helper robusto para ler input tanto em execução local quanto via curl | bash
@@ -351,6 +353,12 @@ fi
 echo -e "\n${GREEN_BOLD}=========================================================================${NC}"
 echo -e "${GREEN_BOLD}             SETUP CONCLUÍDO COM SUCESSO PARA AI-RAGJUS!                 ${NC}"
 echo -e "${GREEN_BOLD}=========================================================================${NC}"
-echo -e " 1. Coloque seus documentos jurídicos dentro da pasta correspondente em ${BLUE}./docs/${NC}"
-echo -e " 2. Inicie a aplicação executando: ${GREEN_BOLD}./jus.sh${NC}"
+if [ "$CLONED" = "true" ]; then
+    echo -e " 1. Acesse a pasta do projeto executando: ${GREEN_BOLD}cd ai-ragjus${NC}"
+    echo -e " 2. Coloque seus documentos jurídicos dentro de ${BLUE}./docs/${NC}"
+    echo -e " 3. Inicie a aplicação executando: ${GREEN_BOLD}./jus.sh${NC}"
+else
+    echo -e " 1. Coloque seus documentos jurídicos dentro da pasta correspondente em ${BLUE}./docs/${NC}"
+    echo -e " 2. Inicie a aplicação executando: ${GREEN_BOLD}./jus.sh${NC}"
+fi
 echo -e "${GREEN_BOLD}=========================================================================${NC}"
