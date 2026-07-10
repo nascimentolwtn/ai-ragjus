@@ -88,10 +88,22 @@ menu_principal() {
                     local contexto
                     contexto=$(echo "$trechos" | jq -r '.[] | "Arquivo: " + .caminho + "\nTrecho: " + .texto + "\n---"' 2>/dev/null || echo "")
                     
+                    # Consulta estatísticas do acervo local no SQLite para evitar alucinações da IA
+                    local db_path
+                    db_path=$(obter_db_path)
+                    local total_arquivos
+                    total_arquivos=$(sqlite3 "$db_path" "SELECT COUNT(DISTINCT caminho_arquivo) FROM document_chunks;" 2>/dev/null || echo "0")
+                    local arquivos_nomes
+                    arquivos_nomes=$(sqlite3 "$db_path" "SELECT DISTINCT caminho_arquivo FROM document_chunks;" 2>/dev/null | awk -F/ '{print $NF}' | sort -u | paste -sd ", " - || echo "")
+
                     # 4. Monta o prompt RAG
                     local prompt
                     if [ -n "$contexto" ]; then
-                        prompt="Você é um assistente jurídico especialista de elite. Baseado estritamente nos trechos de documentos fornecidos abaixo, responda de forma muito clara, técnica e objetiva à pergunta do usuário. Forneça sempre o nome do arquivo fonte de onde retirou as informações. Se as informações não estiverem no contexto fornecido, diga que não localizou essa informação no acervo de documentos locais.
+                        prompt="Você é um assistente jurídico especialista de elite. Baseado nos trechos de documentos fornecidos abaixo e nos metadados reais do acervo local, responda de forma clara e objetiva à pergunta do usuário.
+
+Metadados do Acervo Local:
+- Total de arquivos jurídicos indexados: $total_arquivos
+- Nomes dos arquivos no acervo: $arquivos_nomes
 
 Documentos Jurídicos de Contexto:
 $contexto

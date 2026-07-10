@@ -72,7 +72,7 @@ perguntar_ollama() {
     fi
 
     local json_payload
-    json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$prompt" '{"model": $model, "prompt": $prompt, "stream": true}')
+    json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$prompt" '{"model": $model, "prompt": $prompt, "stream": true, "options": {"temperature": 0}}')
 
     while true; do
         local response_started=false
