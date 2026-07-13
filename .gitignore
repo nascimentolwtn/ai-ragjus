@@ -20,3 +20,19 @@ node_modules/\n.env\n.DS_Store
 .cache_vetorial/rag_store.db
 *.db
 /.cache_vetorial
+
+# Python / Virtual Environment
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.venv
+
+# Flask / Web app
+web/data/
+web/data/*.db
