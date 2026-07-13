@@ -18,6 +18,8 @@ carregar_configuracoes() {
     CHUNK_SIZE=1000
     CHUNK_OVERLAP=200
     TEMPERATURA=0
+    RAGSEC_MODE=0
+    AUDIT_RETENTION_DIAS=365
 
     if [ -f "$config_file" ]; then
         # Lê linha a linha para carregar apenas variáveis bem formatadas e evitar execução de código arbitrário
@@ -40,12 +42,14 @@ carregar_configuracoes() {
                 CHUNK_SIZE) CHUNK_SIZE="$value" ;;
                 CHUNK_OVERLAP) CHUNK_OVERLAP="$value" ;;
                 TEMPERATURA) TEMPERATURA="$value" ;;
+                RAGSEC_MODE) RAGSEC_MODE="$value" ;;
+                AUDIT_RETENTION_DIAS) AUDIT_RETENTION_DIAS="$value" ;;
             esac
         done < "$config_file"
     fi
-    
+
     # Exporta para os outros scripts
-    export PASTA_ALVO CACHE_DIR OLLAMA_URL MODELO_IA MODELO_EMBEDDING MAX_FILE_SIZE_MB CHUNK_SIZE CHUNK_OVERLAP TEMPERATURA
+    export PASTA_ALVO CACHE_DIR OLLAMA_URL MODELO_IA MODELO_EMBEDDING MAX_FILE_SIZE_MB CHUNK_SIZE CHUNK_OVERLAP TEMPERATURA RAGSEC_MODE AUDIT_RETENTION_DIAS
 }
 
 # Atualiza uma chave de configuração no config.conf
@@ -70,6 +74,8 @@ atualizar_configuracao() {
         CHUNK_SIZE) CHUNK_SIZE="$valor" ;;
         CHUNK_OVERLAP) CHUNK_OVERLAP="$valor" ;;
         TEMPERATURA) TEMPERATURA="$valor" ;;
+        RAGSEC_MODE) RAGSEC_MODE="$valor" ;;
+        AUDIT_RETENTION_DIAS) AUDIT_RETENTION_DIAS="$valor" ;;
     esac
 
     # Atualiza ou adiciona a linha no arquivo
