@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}AI-RAGJus — Chat Jurídico{% endblock %}
+
+{% block body %}
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <span class="brand">AI-RAGJus</span>
+            <span class="brand-sub">100% OFF-LINE</span>
+        </div>
+
+        <button id="new-chat-btn" class="new-chat-btn" type="button">+ Nova conversa</button>
+
+        <div class="session-list" id="session-list">
+            {% for s in sessions %}
+            <button class="session-item" data-session-id="{{ s.id }}" type="button">
+                {{ s.title or "Nova conversa" }}
+            </button>
+            {% else %}
+            <p class="session-empty">Nenhuma conversa ainda.</p>
+            {% endfor %}
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="config-line"><span>Modelo:</span> <strong>{{ config.MODELO_IA }}</strong></div>
+            <div class="config-line"><span>Embedding:</span> <strong>{{ config.MODELO_EMBEDDING }}</strong></div>
+            <div class="config-line"><span>Temperatura:</span> <strong>{{ config.TEMPERATURA }}</strong></div>
+            <div class="config-line"><span>Acervo:</span> <strong title="{{ config.PASTA_ALVO }}">{{ config.PASTA_ALVO }}</strong></div>
+        </div>
+    </aside>
+
+    <main class="chat-pane">
+        <header class="chat-header">
+            <h1>Chat Jurídico RAG</h1>
+            <span class="status-dot" id="status-dot" title="Status"></span>
+        </header>
+
+        <div class="messages" id="messages">
+            <div class="message assistant">
+                <div class="message-role">AI-RAGJus</div>
+                <div class="message-content">
+                    Olá! Sou o assistente jurídico local do AI-RAGJus. Faça uma pergunta sobre
+                    o seu acervo de documentos indexados e eu responderei com base nos trechos
+                    mais relevantes encontrados.
+                </div>
+            </div>
+        </div>
+
+        <form id="chat-form" class="chat-input-form" autocomplete="off">
+            <textarea
+                id="chat-input"
+                class="chat-input"
+                placeholder="Digite sua pergunta jurídica... (Enter para enviar, Shift+Enter para quebrar linha)"
+                rows="1"
+                required></textarea>
+            <button type="submit" id="send-btn" class="send-btn">Enviar</button>
+        </form>
+    </main>
+</div>
+
+<script src="{{ url_for('static', filename='chat.js') }}"></script>
+{% endblock %}
