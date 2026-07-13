@@ -4,11 +4,21 @@
 # =========================================================================
 
 # Cores ANSI para feedback visual do auto-healing
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Em modo NON_INTERACTIVE (interface Web) as cores são suprimidas para que
+# apenas JSON limpo chegue ao consumidor (ver perguntar_ollama/gerar_embedding).
+if [ "$NON_INTERACTIVE" = "1" ]; then
+    RED=''
+    GREEN=''
+    YELLOW=''
+    BLUE=''
+    NC=''
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m'
+fi
 
 # Gera o vetor de embedding para um bloco de texto (com auto-recuperação de modelo ausente)
 gerar_embedding() {
@@ -37,15 +47,20 @@ gerar_embedding() {
         
         # Se for erro de modelo ausente (not found)
         if echo "$err_msg" | grep -iq "not found"; then
+            if [ "$NON_INTERACTIVE" = "1" ]; then
+                jq -cn --arg msg "Modelo de embedding '$MODELO_EMBEDDING' não encontrado no Ollama." '{type:"error", content:$msg}' >&2
+                return 1
+            fi
+
             echo -e "\n${YELLOW}[AVISO] O modelo de indexação '$MODELO_EMBEDDING' não foi encontrado no seu Ollama.${NC}" >&2
             local baixar_embed
             read -p "Deseja realizar o download dele automaticamente agora? (~270MB) (s/n): " baixar_embed < /dev/tty
-            
+
             if [ "$baixar_embed" = "s" ] || [ "$baixar_embed" = "S" ]; then
                 echo -e "${BLUE}Baixando nomic-embed-text...${NC}" >&2
                 curl -d "{\"name\": \"$MODELO_EMBEDDING\"}" "$OLLAMA_URL/api/pull" >&2
                 echo -e "\n${GREEN}[OK] Modelo de embedding instalado! Reexecutando indexação...${NC}" >&2
-                
+
                 # Chamada recursiva após o download
                 gerar_embedding "$texto"
                 return $?
@@ -54,7 +69,11 @@ gerar_embedding() {
 
         # Se falhar e não puder recuperar
         [ -z "$err_msg" ] && err_msg="Falha de comunicação com o Ollama"
-        echo "Erro ao gerar embedding: $err_msg" >&2
+        if [ "$NON_INTERACTIVE" = "1" ]; then
+            jq -cn --arg msg "Erro ao gerar embedding: $err_msg" '{type:"error", content:$msg}' >&2
+        else
+            echo "Erro ao gerar embedding: $err_msg" >&2
+        fi
         return 1
     fi
 
@@ -90,6 +109,12 @@ perguntar_ollama() {
                 if [ -n "$erro" ]; then
                     # Se o modelo não foi encontrado (not found)
                     if echo "$erro" | grep -iq "not found"; then
+                        if [ "$NON_INTERACTIVE" = "1" ]; then
+                            jq -cn --arg msg "Modelo '$MODELO_IA' não encontrado no Ollama." '{type:"error", content:$msg}'
+                            has_error=true
+                            break
+                        fi
+
                         echo -e "\n${YELLOW}[AVISO] O modelo lógico '$MODELO_IA' não foi encontrado no seu Ollama.${NC}" >&2
                         local baixar_ia
                         read -p "Deseja realizar o download dele automaticamente agora? (s/n): " baixar_ia < /dev/tty
@@ -103,7 +128,11 @@ perguntar_ollama() {
                     fi
 
                     # Outros erros comuns
-                    echo -e "\n${RED}[Erro do Ollama]: $erro${NC}" >&2
+                    if [ "$NON_INTERACTIVE" = "1" ]; then
+                        jq -cn --arg msg "$erro" '{type:"error", content:$msg}'
+                    else
+                        echo -e "\n${RED}[Erro do Ollama]: $erro${NC}" >&2
+                    fi
                     has_error=true
                     break
                 fi
@@ -111,7 +140,11 @@ perguntar_ollama() {
                 local token
                 token=$(echo "$line" | jq -r '.response // empty' 2>/dev/null || echo -n "")
                 if [ -n "$token" ]; then
-                    echo -ne "${GREEN}${token}${NC}"
+                    if [ "$NON_INTERACTIVE" = "1" ]; then
+                        jq -cn --arg t "$token" '{type:"token", content:$t}'
+                    else
+                        echo -ne "${GREEN}${token}${NC}"
+                    fi
                     response_started=true
                 fi
             fi
@@ -128,12 +161,18 @@ perguntar_ollama() {
 
         # Se nada foi impresso, diagnostica a falha
         if [ "$response_started" = false ] && [ "$has_error" = false ]; then
-            echo -e "${RED}[Erro]: Nenhuma resposta foi retornada pelo Ollama.${NC}" >&2
-            echo -e "${RED}Verifique se o modelo '$MODELO_IA' está carregado corretamente e se há memória RAM livre suficiente.${NC}" >&2
+            if [ "$NON_INTERACTIVE" = "1" ]; then
+                jq -cn --arg msg "Nenhuma resposta foi retornada pelo Ollama. Verifique se o modelo '$MODELO_IA' está carregado corretamente e se há memória RAM livre suficiente." '{type:"error", content:$msg}'
+            else
+                echo -e "${RED}[Erro]: Nenhuma resposta foi retornada pelo Ollama.${NC}" >&2
+                echo -e "${RED}Verifique se o modelo '$MODELO_IA' está carregado corretamente e se há memória RAM livre suficiente.${NC}" >&2
+            fi
         fi
 
         break
     done
 
-    echo "" # Quebra de linha ao final do streaming
+    # Quebra de linha ao final do streaming (apenas na CLI interativa; o modo
+    # NON_INTERACTIVE já emite eventos JSON linha-a-linha e não precisa disso)
+    [ "$NON_INTERACTIVE" = "1" ] || echo ""
 }
