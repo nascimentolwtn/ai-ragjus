@@ -25,6 +25,70 @@ CREATE TABLE IF NOT EXISTS document_chunks (
 CREATE INDEX IF NOT EXISTS idx_caminho ON document_chunks (caminho_arquivo);
 CREATE INDEX IF NOT EXISTS idx_hash ON document_chunks (hash_arquivo);
 EOF
+
+    # Migrações RAGSEC (RBAC / Classificação / DLP / Auditoria).
+    # Só executa quando RAGSEC_MODE=1 - a build jurídica padrão nunca toca nestas tabelas.
+    if [ "${RAGSEC_MODE:-0}" = "1" ]; then
+        _ragsec_migrar_schema "$db_path"
+    fi
+}
+
+# Aplica migrações idempotentes de schema para o modo RAGSEC (RBAC/Classificação/DLP/Auditoria)
+_ragsec_migrar_schema() {
+    local db_path="$1"
+
+    # ALTER TABLE ADD COLUMN não é idempotente no SQLite; verifica antes de aplicar.
+    local coluna_existe
+    coluna_existe=$(sqlite3 "$db_path" "PRAGMA table_info(document_chunks);" 2>/dev/null | awk -F'|' '{print $2}' | grep -c '^classificacao$' || true)
+    if [ "${coluna_existe:-0}" -eq 0 ]; then
+        sqlite3 "$db_path" "ALTER TABLE document_chunks ADD COLUMN classificacao TEXT NOT NULL DEFAULT 'internal';"
+    fi
+
+    sqlite3 "$db_path" <<'EOF'
+CREATE INDEX IF NOT EXISTS idx_classificacao ON document_chunks (classificacao);
+
+CREATE TABLE IF NOT EXISTS usuarios (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT UNIQUE NOT NULL,
+    senha_hash    TEXT NOT NULL,
+    role          TEXT NOT NULL CHECK (role IN ('engineer','manager','exec','auditor')),
+    clearance     INTEGER NOT NULL,
+    ativo         INTEGER NOT NULL DEFAULT 1,
+    criado_em     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Registro de classificação por documento (fonte da verdade por arquivo)
+CREATE TABLE IF NOT EXISTS doc_classificacao (
+    caminho_arquivo TEXT PRIMARY KEY,
+    classificacao   TEXT NOT NULL CHECK (classificacao IN ('public','internal','confidential','secret')),
+    nivel           INTEGER NOT NULL,
+    classificado_por TEXT,
+    classificado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             TEXT NOT NULL DEFAULT (datetime('now')),
+    username       TEXT NOT NULL,
+    role           TEXT NOT NULL,
+    query_text     TEXT NOT NULL,
+    docs_acessados TEXT,
+    max_score      REAL,
+    dlp_action     TEXT NOT NULL,
+    dlp_rule       TEXT
+);
+
+CREATE TABLE IF NOT EXISTS dlp_rules (
+    id       TEXT PRIMARY KEY,
+    padrao   TEXT NOT NULL,
+    acao     TEXT NOT NULL,
+    escopo   TEXT NOT NULL DEFAULT 'all',
+    ativo    INTEGER NOT NULL DEFAULT 1
+);
+EOF
+
+    # Postura de segurança padrão: banco de dados restrito ao dono (defesa em profundidade)
+    chmod 600 "$db_path" 2>/dev/null || true
 }
 
 # Verifica se o arquivo com o hash específico já está no banco de dados
@@ -84,8 +148,8 @@ buscar_trechos_relevantes() {
         return
     fi
 
-    # Filtro de acervo dinâmico por metadados (número do processo)
-    local where_clause=""
+    # Filtro de acervo dinâmico por metadados (número do processo) + filtro de clearance RAGSEC
+    local condicoes=()
     if [ -n "$query_original" ]; then
         # Extrai número de processo (4 dígitos + ponto opcional + 10 dígitos)
         local reg_num
@@ -98,10 +162,24 @@ buscar_trechos_relevantes() {
         if [ -n "$reg_num" ]; then
             local reg_clean
             reg_clean=${reg_num//./}
-            where_clause="WHERE caminho_arquivo LIKE '%$reg_num%' OR replace(caminho_arquivo, '.', '') LIKE '%$reg_clean%'"
+            condicoes+=("(caminho_arquivo LIKE '%$reg_num%' OR replace(caminho_arquivo, '.', '') LIKE '%$reg_clean%')")
             # Imprime aviso visual na stderr (pois stdout retorna o JSON)
             echo -e "${YELLOW}[Filtro de Acervo Ativo: $reg_num (Buscando apenas neste arquivo)]${NC}" >&2
         fi
+    fi
+
+    # RAGSEC: injeta filtro de clearance server-side (não é fornecido pelo usuário)
+    if [ "${RAGSEC_MODE:-0}" = "1" ]; then
+        local clausula_clearance
+        clausula_clearance=$(filtro_clearance_sql "${RAGSEC_CLEARANCE:-0}")
+        condicoes+=("$clausula_clearance")
+    fi
+
+    local where_clause=""
+    if [ ${#condicoes[@]} -gt 0 ]; then
+        local joined
+        joined=$(IFS=' AND '; echo "${condicoes[*]}")
+        where_clause="WHERE $joined"
     fi
 
     # Recupera os chunks filtrados ou todos serializados em formato JSON
