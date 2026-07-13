@@ -27,6 +27,15 @@ src/
   ingest.sh         extrair_texto_limpo(), fatiar_texto() (via jq), sincronizar_pasta()
   vector.sh         buscar_trechos_relevantes() (cosine similarity in jq)
   ai.sh             gerar_embedding(), perguntar_ollama() (Ollama API, auto-recovery)
+  rag_query.sh      Non-interactive LIG flow (used by web GUI)
+
+web/
+  app.py            Flask web server (routes, SSE streaming)
+  db.py             Chat history database schema & helpers
+  run.sh            Startup script (sets NON_INTERACTIVE=1)
+  requirements.txt  Python dependencies (Flask, requests)
+  templates/        HTML templates (base.html, chat.html)
+  static/           CSS & JavaScript (style.css, chat.js)
 ```
 
 ## Key Design Patterns
@@ -74,16 +83,16 @@ chmod +x setup.sh jus.sh
 - **3**: Change inference model (auto-downloads if missing)
 - **4**: Change target documents folder path
 - **5**: View hardware & system info
-- **6**: Advanced configuration (chunking, temperature, etc.)
+- **6**: Advanced configuration (chunking, temperature, backend, etc.)
 - **7**: Exit
 
-### Minimal Workflow
+### Minimal Workflow (CLI)
 
 ```bash
 # Terminal 1: Start Ollama (keeps running)
 ollama serve
 
-# Terminal 2: Run AI-RAGJus
+# Terminal 2: Run AI-RAGJus CLI
 cd /path/to/ai-ragjus
 ./jus.sh
 → Select option 2 (Sync documents)
@@ -94,6 +103,47 @@ cd /path/to/ai-ragjus
 → See response + source documents cited
 ```
 
+### Flask Web GUI
+
+**Prerequisites:**
+- Python 3.8+
+- Flask, requests (auto-installed via `web/requirements.txt`)
+- Ollama running at `localhost:11434` (same as CLI)
+- Documents indexed via CLI sync (shares the same `.cache_vetorial/rag_store.db`)
+
+**Start the Web GUI:**
+
+```bash
+# Terminal 1: Start Ollama (keeps running)
+ollama serve
+
+# Terminal 2: Start Flask web server
+cd /path/to/ai-ragjus/web
+pip install -r requirements.txt
+./run.sh
+# → Flask runs on http://localhost:5000
+# → Open browser: http://localhost:5000
+```
+
+**Features:**
+- ChatGPT-like interface with session management
+- Real-time token streaming (Server-Sent Events)
+- Source document attribution below each response
+- Persistent chat history in separate `web/data/chat_history.db`
+- Dark/light theme (respects system preference)
+- Same RAG backend as CLI (shares vector store, models, config)
+
+**Configuration:**
+- Flask reads `config.conf` at startup (same as CLI)
+- Models, chunk size, temperature, document folder all inherited from CLI config
+- To change settings: stop Flask, edit `config.conf`, restart Flask
+
+**Notes:**
+- Web app is **Phase 1** — uses CLI shell scripts as subprocesses (non-interactive mode)
+- Future Phase 2 will port hot paths to Python for better performance
+- Chat history stored separately; won't interfere with CLI usage
+- Multiple browser tabs share the same session history
+
 ### Configuration
 
 Edit `config.conf` for:
@@ -103,8 +153,14 @@ Edit `config.conf` for:
 - `CHUNK_SIZE`: Text chunk size (default: 1000 chars)
 - `CHUNK_OVERLAP`: Overlap between chunks (default: 200 chars)
 - `TEMPERATURA`: Model temperature (default: 0 for deterministic legal responses)
+- `BACKEND`: LLM backend (default: `ollama`; also supports `llamacpp` for llama.cpp at localhost:8000)
 
-**Restart jus.sh after changing config.conf.**
+**Backend Selection:**
+- Use menu option 6 → Advanced Configuration → "Alterar Backend de Inferência" to switch
+- **ollama** (default): Ollama `/api/generate` endpoint at `localhost:11434`
+- **llamacpp**: llama.cpp OpenAI-compatible `/v1/chat/completions` at `localhost:8000`
+
+**Restart jus.sh (or Flask) after changing config.conf.**
 
 ### Troubleshooting
 
@@ -132,14 +188,26 @@ bats test/unit/
 - Verify `pdftotext` works: `pdftotext --version`
 - Small test PDFs in test/fixtures/ preferred
 
+## Optional Features
+
+**RAGSEC Mode** (Security-Hardened Company Secrets RAG):
+- Enable in `config.conf`: `RAGSEC_MODE=1`
+- Adds RBAC (4 roles: engineer, manager, exec, auditor) + document classification
+- DLP engine blocks/redacts sensitive patterns (API keys, private keys, connection strings, etc.)
+- Audit logging (queryable, 365-day retention)
+- Separate login gate; role-based menu gating; clearance-filtered search results
+- Default off; legal RAG build unaffected when `RAGSEC_MODE=0`
+- See `.claude/plans/ragsec_company_variant.md` for full architecture
+
 ## Critical Constraints
 
 - **TEMPERATURA=0** (deterministic legal advice); hardcoded in config.sh
-- **No external APIs** — all local via Ollama
+- **No external APIs** — all local via Ollama (or llama.cpp)
 - **Single-threaded SQLite** — safe for one user only
 - **Config reloads require restart** — globals set once at startup
 - **768D embeddings** (nomic-embed-text) — swapping models may need schema change
 - **Ollama timeout** — no curl timeout set; consider `--max-time 60` for slow responses
+- **Flask web GUI** — Phase 1 uses shell subprocesses; direct Python model loading comes in Phase 2
 
 ## Common Tasks
 
