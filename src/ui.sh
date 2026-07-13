@@ -22,8 +22,23 @@ limpar_tela_retro() {
     fi
 }
 
-# Desenha o cabeçalho clássico do sistema
+# Desenha o cabeçalho clássico do sistema (rebrandeado para RAGSEC quando ativo)
 exibir_cabecalho() {
+    if [ "${RAGSEC_MODE:-0}" = "1" ]; then
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "${GREEN_BOLD}          R A G S E C   —   C O M P A N Y   S E C R E T   R A G          ${NC}"
+        echo -e "${GREEN_DIM}   [ RBAC + CLASSIFICAÇÃO + DLP + AUDITORIA - 100% OFF-LINE / AIR-GAPPED ]${NC}"
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        if [ -n "${RAGSEC_USER:-}" ]; then
+            echo -e "${GREEN_DIM} Usuário: ${GREEN}$RAGSEC_USER${GREEN_DIM} | Papel: ${GREEN}$RAGSEC_ROLE${GREEN_DIM} | Clearance: ${GREEN}$RAGSEC_CLEARANCE${NC}"
+        else
+            echo -e "${YELLOW} Nenhuma sessão ativa. É necessário fazer login para continuar.${NC}"
+        fi
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo ""
+        return
+    fi
+
     echo -e "${GREEN_BOLD}=========================================================================${NC}"
     echo -e "${GREEN_BOLD}                   A I  -  J U S R A G   v0.1.0                          ${NC}"
     echo -e "${GREEN_DIM}         [ SISTEMA DE BUSCA JURÍDICA LOCAL - 100% OFF-LINE ]            ${NC}"
@@ -31,6 +46,30 @@ exibir_cabecalho() {
     echo -e "${GREEN_DIM} Status do Ollama: ${GREEN}ATIVO${GREEN_DIM} | Privacidade: ${GREEN}MÁXIMA (LOCAL/AIR-GAPPED)${NC}"
     echo -e "${GREEN_BOLD}=========================================================================${NC}"
     echo ""
+}
+
+# Exibe as opções de menu adicionais do RAGSEC, visíveis conforme o papel logado.
+# Puramente cosmético: o gate real de autorização acontece em jus.sh (server-side).
+exibir_menu_ragsec_extra() {
+    [ "${RAGSEC_MODE:-0}" = "1" ] || return 0
+
+    echo -e ""
+    if [ -n "${RAGSEC_USER:-}" ]; then
+        echo -e "  ${GREEN}L)${NC} Logout (usuário atual: ${BLUE}$RAGSEC_USER${NC} / ${BLUE}$RAGSEC_ROLE${NC})"
+    else
+        echo -e "  ${GREEN}L)${NC} Login"
+    fi
+
+    if [ "${RAGSEC_ROLE:-}" = "exec" ]; then
+        echo -e "  ${GREEN}U)${NC} [Admin] Gerenciamento de Usuários"
+        echo -e "  ${GREEN}D)${NC} [Admin] Regras de DLP"
+    fi
+    if [ "${RAGSEC_ROLE:-}" = "exec" ] || [ "${RAGSEC_ROLE:-}" = "manager" ]; then
+        echo -e "  ${GREEN}C)${NC} [Admin] Gerenciador de Classificação de Documentos"
+    fi
+    if [ "${RAGSEC_ROLE:-}" = "auditor" ]; then
+        echo -e "  ${GREEN}A)${NC} [Auditor] Ver Log de Auditoria"
+    fi
 }
 
 # Simula o efeito de digitação clássico de terminais retrô
