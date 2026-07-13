@@ -20,3 +20,9 @@ node_modules/\n.env\n.DS_Store
 .cache_vetorial/rag_store.db
 *.db
 /.cache_vetorial
+
+# Web GUI (Flask)
+web/data/
+__pycache__/
+*.pyc
+venv/

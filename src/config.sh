@@ -3,6 +3,12 @@
 # AI-JusRAG - Módulo de Gerenciamento de Configuração
 # =========================================================================
 
+# Detecta modo não-interativo (usado pela interface Web/Flask) para suprimir
+# cores ANSI e prompts que leem de /dev/tty (ver src/ai.sh). Mantém o padrão
+# "0" para preservar o comportamento interativo do jus.sh/CLI.
+NON_INTERACTIVE="${NON_INTERACTIVE:-0}"
+export NON_INTERACTIVE
+
 # Carrega as configurações do arquivo config.conf ou define padrões caso não exista
 carregar_configuracoes() {
     local app_dir="$1"

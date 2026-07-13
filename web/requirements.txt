@@ -1,0 +1,3 @@
+# AI-RAGJus Web GUI - minimal Python dependencies.
+# The RAG "brain" stays in src/*.sh; Flask is only an orchestration layer.
+flask>=3.0
