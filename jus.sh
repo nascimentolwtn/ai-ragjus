@@ -11,7 +11,17 @@ set -eo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 2. Importação de Módulos
+# Detecta RAGSEC_MODE diretamente do config.conf ANTES de sourcear qualquer módulo,
+# pois carregar_configuracoes() só roda depois - os módulos de governança
+# (rbac/auth/dlp/audit) só são sourceados quando o modo está ativo, mantendo a
+# build jurídica padrão (RAGSEC_MODE=0) inteiramente livre desse código extra.
+_ragsec_mode_detectado=$(grep -E '^RAGSEC_MODE=' "$APP_DIR/config.conf" 2>/dev/null | head -n 1 | cut -d'=' -f2 | tr -d '"'"'"' \t')
+
 modulos=("config.sh" "ui.sh" "ai.sh" "ingest.sh" "vector.sh")
+if [ "$_ragsec_mode_detectado" = "1" ]; then
+    modulos+=("rbac.sh" "auth.sh" "dlp.sh" "audit.sh")
+fi
+
 for modulo in "${modulos[@]}"; do
     if [ -f "$APP_DIR/src/$modulo" ]; then
         source "$APP_DIR/src/$modulo"
@@ -23,6 +33,24 @@ done
 
 # Carrega as configurações
 carregar_configuracoes "$APP_DIR"
+
+# 2b. Gate de autenticação RAGSEC - roda ANTES do menu principal.
+# Quando RAGSEC_MODE=0 este bloco inteiro é ignorado (compatibilidade retroativa).
+if [ "${RAGSEC_MODE:-0}" = "1" ]; then
+    mkdir -p "$CACHE_DIR"
+    inicializar_banco_vetorial   # aplica migrações idempotentes (usuarios/dlp_rules/audit_log/...)
+    _ragsec_seed_dlp_rules       # semeia regras DLP padrão na primeira execução
+
+    if ! validar_sessao; then
+        limpar_tela_retro
+        exibir_cabecalho
+        echo -e "${YELLOW}[RAGSEC] Autenticação obrigatória para continuar.${NC}"
+        if ! login_usuario; then
+            echo -e "${RED}[ERRO] Não foi possível autenticar. Encerrando.${NC}" >&2
+            exit 1
+        fi
+    fi
+fi
 
 # 3. Função do Menu Principal
 menu_principal() {
@@ -36,20 +64,37 @@ menu_principal() {
         echo -e "  ${GREEN}4)${NC} Alterar Pasta de Documentos Alvo"
         echo -e "  ${GREEN}5)${NC} Informações de Hardware & Sistema"
         echo -e "  ${GREEN}6)${NC} Configurações Avançadas"
+        exibir_menu_ragsec_extra
         echo -e "  ${GREEN}7)${NC} Sair do Sistema"
         echo -e ""
         echo -e "${GREEN}=========================================================================${NC}"
-        
+
         local opcao
-        read -p "Digite a opção desejada (1-7): " opcao
-        
+        read -p "Digite a opção desejada: " opcao
+
         case "$opcao" in
             1)
+                # Gate server-side do RAGSEC: revalida sessão e bloqueia o papel 'auditor'
+                # (que só tem acesso ao log de auditoria, nunca a conteúdo) mesmo que a
+                # opção de menu esteja visível - o menu é conveniência, não o controle.
+                if [ "${RAGSEC_MODE:-0}" = "1" ]; then
+                    if ! validar_sessao; then
+                        echo -e "${RED}[ERRO] Sessão inválida ou expirada. Faça login novamente (opção L).${NC}" >&2
+                        sleep 2
+                        continue
+                    fi
+                    if [ "${RAGSEC_ROLE:-}" = "auditor" ]; then
+                        echo -e "${RED}[ERRO] O papel 'auditor' não tem permissão para consultar conteúdo. Use a opção de Log de Auditoria.${NC}" >&2
+                        sleep 2
+                        continue
+                    fi
+                fi
+
                 limpar_tela_retro
                 exibir_cabecalho
                 exibir_texto_digitando "Chat Jurídico RAG Iniciado. Digite 'sair' para retornar ao menu."
                 echo -e "-------------------------------------------------------------------------"
-                
+
                 while true; do
                     echo -ne "\n${GREEN_BOLD}Advogado (Pergunta): ${NC}"
                     local query
@@ -118,8 +163,34 @@ Pergunta do Usuário:
 $query"
                     fi
 
-                    echo -e "\n${GREEN_BOLD}AI-JusRAG (Resposta):${NC}"
-                    perguntar_ollama "$prompt"
+                    if [ "${RAGSEC_MODE:-0}" = "1" ]; then
+                        # RAGSEC: a resposta precisa ser bufferizada (não streamada direto)
+                        # para que o DLP possa varrê-la ANTES de ser exibida ao usuário, e
+                        # para que a auditoria seja registrada antes da exibição da resposta.
+                        local resposta_bruta
+                        resposta_bruta=$(perguntar_ollama "$prompt" 2>/dev/null)
+
+                        executar_dlp_pos_geracao "$resposta_bruta"
+
+                        local docs_json max_score
+                        docs_json=$(echo "$trechos" | jq -c '[.[].caminho] | unique' 2>/dev/null || echo "[]")
+                        max_score=$(echo "$trechos" | jq -r '[.[].score] | max // 0' 2>/dev/null || echo "0")
+
+                        registrar_auditoria "$RAGSEC_USER" "$RAGSEC_ROLE" "$query" "$docs_json" "$max_score" "$DLP_ACAO" "$DLP_REGRA"
+
+                        echo -e "\n${GREEN_BOLD}RAGSEC (Resposta):${NC}"
+                        if [ "$DLP_ACAO" = "block" ]; then
+                            echo -e "${RED}${DLP_RESPOSTA_FINAL}${NC}"
+                        elif [ "$DLP_ACAO" = "redact" ]; then
+                            echo -e "${YELLOW}[DLP] Trechos sensíveis foram redigidos nesta resposta.${NC}"
+                            echo -e "${GREEN}${DLP_RESPOSTA_FINAL}${NC}"
+                        else
+                            echo -e "${GREEN}${DLP_RESPOSTA_FINAL}${NC}"
+                        fi
+                    else
+                        echo -e "\n${GREEN_BOLD}AI-JusRAG (Resposta):${NC}"
+                        perguntar_ollama "$prompt"
+                    fi
                     echo -e "\n-------------------------------------------------------------------------"
                 done
                 ;;
@@ -177,6 +248,64 @@ $query"
                 exibir_texto_digitando "Saindo do AI-JusRAG. Até logo!"
                 echo ""
                 exit 0
+                ;;
+            L|l)
+                if [ "${RAGSEC_MODE:-0}" != "1" ]; then
+                    echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
+                    sleep 1
+                else
+                    limpar_tela_retro
+                    exibir_cabecalho
+                    if [ -n "${RAGSEC_USER:-}" ]; then
+                        logout_usuario
+                    fi
+                    login_usuario || echo -e "${RED}[ERRO] Login não realizado.${NC}" >&2
+                    read -p "Pressione [Enter] para continuar..."
+                fi
+                ;;
+            U|u)
+                if [ "${RAGSEC_MODE:-0}" != "1" ]; then
+                    echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
+                    sleep 1
+                elif ! validar_sessao || [ "${RAGSEC_ROLE:-}" != "exec" ]; then
+                    echo -e "${RED}[ERRO] Acesso negado. Esta ação requer o papel 'exec'.${NC}" >&2
+                    sleep 2
+                else
+                    menu_gerenciar_usuarios
+                fi
+                ;;
+            C|c)
+                if [ "${RAGSEC_MODE:-0}" != "1" ]; then
+                    echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
+                    sleep 1
+                elif ! validar_sessao || { [ "${RAGSEC_ROLE:-}" != "exec" ] && [ "${RAGSEC_ROLE:-}" != "manager" ]; }; then
+                    echo -e "${RED}[ERRO] Acesso negado. Esta ação requer o papel 'exec' ou 'manager'.${NC}" >&2
+                    sleep 2
+                else
+                    menu_classificacao_documentos
+                fi
+                ;;
+            D|d)
+                if [ "${RAGSEC_MODE:-0}" != "1" ]; then
+                    echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
+                    sleep 1
+                elif ! validar_sessao || [ "${RAGSEC_ROLE:-}" != "exec" ]; then
+                    echo -e "${RED}[ERRO] Acesso negado. Esta ação requer o papel 'exec'.${NC}" >&2
+                    sleep 2
+                else
+                    menu_regras_dlp
+                fi
+                ;;
+            A|a)
+                if [ "${RAGSEC_MODE:-0}" != "1" ]; then
+                    echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
+                    sleep 1
+                elif ! validar_sessao || [ "${RAGSEC_ROLE:-}" != "auditor" ]; then
+                    echo -e "${RED}[ERRO] Acesso negado. Esta ação requer o papel 'auditor'.${NC}" >&2
+                    sleep 2
+                else
+                    menu_ver_auditoria
+                fi
                 ;;
             *)
                 echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
@@ -273,6 +402,289 @@ menu_configuracoes_avancadas() {
                 echo -e "${RED}Opção inválida. Tente novamente.${NC}" >&2
                 sleep 1
                 ;;
+        esac
+    done
+}
+
+# =========================================================================
+# RAGSEC - Sub-menus administrativos (só chamados após gate de papel em
+# menu_principal; cada função revalida a sessão de novo antes de qualquer
+# ação mutável, pois o menu é conveniência - não é o controle de acesso).
+# =========================================================================
+
+# [Admin] Gerenciamento de Usuários (exec)
+menu_gerenciar_usuarios() {
+    local db_path
+    db_path=$(obter_db_path)
+
+    while true; do
+        if ! validar_sessao || [ "${RAGSEC_ROLE:-}" != "exec" ]; then
+            echo -e "${RED}[ERRO] Sessão expirada ou papel insuficiente.${NC}" >&2
+            return
+        fi
+
+        limpar_tela_retro
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "${GREEN_BOLD}                  [ADMIN] GERENCIAMENTO DE USUÁRIOS                      ${NC}"
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        sqlite3 -header -column "$db_path" "SELECT id, username, role, clearance, ativo FROM usuarios ORDER BY id;" 2>/dev/null
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "  1) Adicionar novo usuário"
+        echo -e "  2) Ativar/Desativar usuário por id"
+        echo -e "  3) Voltar"
+        local op
+        read -p "Opção: " op
+
+        case "$op" in
+            1)
+                local novo_user nova_senha novo_role nova_clearance
+                read -p "Novo username: " novo_user
+                read -s -p "Senha: " nova_senha
+                echo ""
+                read -p "Papel (engineer/manager/exec/auditor): " novo_role
+                case "$novo_role" in
+                    engineer|manager|exec|auditor) ;;
+                    *) echo -e "${RED}[ERRO] Papel inválido.${NC}" >&2; read -p "Pressione [Enter]..."; continue ;;
+                esac
+                nova_clearance=$(obter_clearance_papel "$novo_role")
+
+                if [ -z "$novo_user" ] || [ -z "$nova_senha" ]; then
+                    echo -e "${RED}[ERRO] Username/senha não podem ser vazios.${NC}" >&2
+                else
+                    local hash_senha user_esc hash_esc
+                    hash_senha=$(_ragsec_hash_senha "$nova_senha")
+                    user_esc=$(_ragsec_escapar_sql "$novo_user")
+                    hash_esc=$(_ragsec_escapar_sql "$hash_senha")
+                    if sqlite3 "$db_path" "INSERT INTO usuarios (username, senha_hash, role, clearance) VALUES ('$user_esc', '$hash_esc', '$novo_role', $nova_clearance);" 2>/dev/null; then
+                        echo -e "${GREEN}[OK] Usuário '$novo_user' criado com papel '$novo_role'.${NC}"
+                    else
+                        echo -e "${RED}[ERRO] Falha ao criar usuário (username já existe?).${NC}" >&2
+                    fi
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            2)
+                local id_alvo estado_atual
+                read -p "ID do usuário: " id_alvo
+                if [[ "$id_alvo" =~ ^[0-9]+$ ]]; then
+                    estado_atual=$(sqlite3 "$db_path" "SELECT ativo FROM usuarios WHERE id = $id_alvo;" 2>/dev/null || echo "")
+                    if [ -z "$estado_atual" ]; then
+                        echo -e "${RED}[ERRO] Usuário não encontrado.${NC}" >&2
+                    else
+                        local novo_estado=1
+                        [ "$estado_atual" = "1" ] && novo_estado=0
+                        sqlite3 "$db_path" "UPDATE usuarios SET ativo = $novo_estado WHERE id = $id_alvo;" 2>/dev/null
+                        echo -e "${GREEN}[OK] Usuário id=$id_alvo agora está $( [ "$novo_estado" = "1" ] && echo "ativo" || echo "desativado").${NC}"
+                    fi
+                else
+                    echo -e "${RED}[ERRO] ID inválido.${NC}" >&2
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            3) return ;;
+            *) echo -e "${RED}Opção inválida.${NC}" >&2; sleep 1 ;;
+        esac
+    done
+}
+
+# [Admin] Gerenciador de Classificação de Documentos (exec/manager)
+menu_classificacao_documentos() {
+    local db_path
+    db_path=$(obter_db_path)
+
+    while true; do
+        if ! validar_sessao || { [ "${RAGSEC_ROLE:-}" != "exec" ] && [ "${RAGSEC_ROLE:-}" != "manager" ]; }; then
+            echo -e "${RED}[ERRO] Sessão expirada ou papel insuficiente.${NC}" >&2
+            return
+        fi
+
+        limpar_tela_retro
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "${GREEN_BOLD}            [ADMIN] GERENCIADOR DE CLASSIFICAÇÃO DE DOCUMENTOS           ${NC}"
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+
+        local arquivos
+        arquivos=$(sqlite3 "$db_path" "SELECT DISTINCT caminho_arquivo, classificacao FROM document_chunks ORDER BY caminho_arquivo;" 2>/dev/null)
+
+        if [ -z "$arquivos" ]; then
+            echo -e "${YELLOW}(Nenhum documento indexado ainda. Rode a sincronização primeiro.)${NC}"
+            echo ""
+            read -p "Pressione [Enter] para voltar..."
+            return
+        fi
+
+        local -a caminhos=()
+        local i=0
+        while IFS='|' read -r caminho classe || [ -n "$caminho" ]; do
+            [ -z "$caminho" ] && continue
+            i=$((i+1))
+            caminhos+=("$caminho")
+            echo -e "  ${GREEN}$i)${NC} [${BLUE}$classe${NC}] $caminho"
+        done <<< "$arquivos"
+
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "  0) Voltar"
+        local escolha
+        read -p "Selecione o número do arquivo para reclassificar (ou 0 para voltar): " escolha
+
+        if [ "$escolha" = "0" ]; then
+            return
+        fi
+
+        if ! [[ "$escolha" =~ ^[0-9]+$ ]] || [ "$escolha" -lt 1 ] || [ "$escolha" -gt "${#caminhos[@]}" ]; then
+            echo -e "${RED}[ERRO] Seleção inválida.${NC}" >&2
+            sleep 1
+            continue
+        fi
+
+        local caminho_alvo="${caminhos[$((escolha-1))]}"
+        echo -e "Arquivo selecionado: ${BLUE}$caminho_alvo${NC}"
+        local nova_classe
+        read -p "Nova classificação (public/internal/confidential/secret): " nova_classe
+
+        case "$nova_classe" in
+            public|internal|confidential|secret) ;;
+            *) echo -e "${RED}[ERRO] Classificação inválida.${NC}" >&2; read -p "Pressione [Enter]..."; continue ;;
+        esac
+
+        # Managers não podem elevar/classificar documentos como 'secret' (só exec pode)
+        if [ "$nova_classe" = "secret" ] && [ "${RAGSEC_ROLE:-}" != "exec" ]; then
+            echo -e "${RED}[ERRO] Apenas o papel 'exec' pode classificar documentos como 'secret'.${NC}" >&2
+            read -p "Pressione [Enter] para continuar..."
+            continue
+        fi
+
+        local nivel caminho_esc classe_esc user_esc
+        nivel=$(obter_nivel_classificacao "$nova_classe")
+        caminho_esc=$(_ragsec_escapar_sql "$caminho_alvo")
+        classe_esc=$(_ragsec_escapar_sql "$nova_classe")
+        user_esc=$(_ragsec_escapar_sql "${RAGSEC_USER:-desconhecido}")
+
+        sqlite3 "$db_path" "UPDATE document_chunks SET classificacao = '$classe_esc' WHERE caminho_arquivo = '$caminho_esc';" 2>/dev/null
+        sqlite3 "$db_path" "INSERT INTO doc_classificacao (caminho_arquivo, classificacao, nivel, classificado_por) VALUES ('$caminho_esc', '$classe_esc', $nivel, '$user_esc')
+            ON CONFLICT(caminho_arquivo) DO UPDATE SET classificacao = excluded.classificacao, nivel = excluded.nivel, classificado_por = excluded.classificado_por, classificado_em = datetime('now');" 2>/dev/null
+
+        echo -e "${GREEN}[OK] '$caminho_alvo' reclassificado como '$nova_classe'.${NC}"
+        read -p "Pressione [Enter] para continuar..."
+    done
+}
+
+# [Admin] Regras de DLP (exec)
+menu_regras_dlp() {
+    local db_path
+    db_path=$(obter_db_path)
+
+    while true; do
+        if ! validar_sessao || [ "${RAGSEC_ROLE:-}" != "exec" ]; then
+            echo -e "${RED}[ERRO] Sessão expirada ou papel insuficiente.${NC}" >&2
+            return
+        fi
+
+        limpar_tela_retro
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "${GREEN_BOLD}                       [ADMIN] REGRAS DE DLP                             ${NC}"
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        sqlite3 -header -column "$db_path" "SELECT id, acao, ativo, padrao FROM dlp_rules ORDER BY id;" 2>/dev/null
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "  1) Adicionar nova regra"
+        echo -e "  2) Ativar/Desativar regra por id"
+        echo -e "  3) Voltar"
+        local op
+        read -p "Opção: " op
+
+        case "$op" in
+            1)
+                local novo_id novo_padrao nova_acao
+                read -p "ID da regra (curto, ex: my_rule): " novo_id
+                read -p "Padrão (regex PCRE): " novo_padrao
+                read -p "Ação (redact/block): " nova_acao
+                case "$nova_acao" in
+                    redact|block) ;;
+                    *) echo -e "${RED}[ERRO] Ação inválida.${NC}" >&2; read -p "Pressione [Enter]..."; continue ;;
+                esac
+                if [ -z "$novo_id" ] || [ -z "$novo_padrao" ]; then
+                    echo -e "${RED}[ERRO] ID/padrão não podem ser vazios.${NC}" >&2
+                else
+                    local id_esc padrao_esc acao_esc
+                    id_esc=$(_ragsec_escapar_sql "$novo_id")
+                    padrao_esc=$(_ragsec_escapar_sql "$novo_padrao")
+                    acao_esc=$(_ragsec_escapar_sql "$nova_acao")
+                    if sqlite3 "$db_path" "INSERT INTO dlp_rules (id, padrao, acao) VALUES ('$id_esc', '$padrao_esc', '$acao_esc');" 2>/dev/null; then
+                        echo -e "${GREEN}[OK] Regra '$novo_id' adicionada.${NC}"
+                    else
+                        echo -e "${RED}[ERRO] Falha ao adicionar regra (id já existe?).${NC}" >&2
+                    fi
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            2)
+                local id_regra estado_atual
+                read -p "ID da regra: " id_regra
+                local id_regra_esc
+                id_regra_esc=$(_ragsec_escapar_sql "$id_regra")
+                estado_atual=$(sqlite3 "$db_path" "SELECT ativo FROM dlp_rules WHERE id = '$id_regra_esc';" 2>/dev/null || echo "")
+                if [ -z "$estado_atual" ]; then
+                    echo -e "${RED}[ERRO] Regra não encontrada.${NC}" >&2
+                else
+                    local novo_estado=1
+                    [ "$estado_atual" = "1" ] && novo_estado=0
+                    sqlite3 "$db_path" "UPDATE dlp_rules SET ativo = $novo_estado WHERE id = '$id_regra_esc';" 2>/dev/null
+                    echo -e "${GREEN}[OK] Regra '$id_regra' agora está $( [ "$novo_estado" = "1" ] && echo "ativa" || echo "desativada").${NC}"
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            3) return ;;
+            *) echo -e "${RED}Opção inválida.${NC}" >&2; sleep 1 ;;
+        esac
+    done
+}
+
+# [Auditor] Visualização do Log de Auditoria (auditor)
+menu_ver_auditoria() {
+    local db_path
+    db_path=$(obter_db_path)
+
+    while true; do
+        if ! validar_sessao || [ "${RAGSEC_ROLE:-}" != "auditor" ]; then
+            echo -e "${RED}[ERRO] Sessão expirada ou papel insuficiente.${NC}" >&2
+            return
+        fi
+
+        limpar_tela_retro
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "${GREEN_BOLD}                     [AUDITOR] LOG DE AUDITORIA                          ${NC}"
+        echo -e "${GREEN_BOLD}=========================================================================${NC}"
+        echo -e "  1) Ver últimas 25 entradas"
+        echo -e "  2) Filtrar por usuário"
+        echo -e "  3) Purgar entradas antigas (retenção: ${AUDIT_RETENTION_DIAS:-365} dias)"
+        echo -e "  4) Voltar"
+        local op
+        read -p "Opção: " op
+
+        case "$op" in
+            1)
+                limpar_tela_retro
+                sqlite3 -header -column "$db_path" \
+                    "SELECT id, ts, username, role, substr(query_text,1,40) AS query, dlp_action, dlp_rule FROM audit_log ORDER BY id DESC LIMIT 25;" 2>/dev/null
+                echo ""
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            2)
+                local user_filtro user_filtro_esc
+                read -p "Username a filtrar: " user_filtro
+                user_filtro_esc=$(_ragsec_escapar_sql "$user_filtro")
+                limpar_tela_retro
+                sqlite3 -header -column "$db_path" \
+                    "SELECT id, ts, username, role, substr(query_text,1,40) AS query, dlp_action, dlp_rule FROM audit_log WHERE username = '$user_filtro_esc' ORDER BY id DESC LIMIT 50;" 2>/dev/null
+                echo ""
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            3)
+                purgar_auditoria
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            4) return ;;
+            *) echo -e "${RED}Opção inválida.${NC}" >&2; sleep 1 ;;
         esac
     done
 }
