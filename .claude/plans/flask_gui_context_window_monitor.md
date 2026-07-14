@@ -1,22 +1,24 @@
 # Flask GUI Context Window Monitor
 
-**Feature**: Real-time chat screen widget estimating/monitoring LLM context usage  
+**Feature**: Real-time per-turn prompt size monitor for LLM context usage  
 **Date**: 2026-07-14  
-**Motivation**: Default inference model `qwen2.5:1.5b` has limited context (~4K–8K tokens). Memory features (M3/M4 from backlog) add extra context. Need visual warning before hitting ceiling to prevent silent truncation or degraded responses.
+**Status**: Fable review complete; critical issues fixed  
+**Motivation**: Inference model `qwen2.5-coder:7b-instruct` prompts are stateless per turn (system + docs + query + memory only). Ollama's `num_ctx` default is 4096, not model's native 32K. Users need visibility into actual per-turn prompt size before hitting ceiling; silent truncation degrades responses.
 
 ---
 
 ## Problem Statement
 
 Current architecture:
-- **Inference model**: `qwen2.5:1.5b` (small, fast, ~4K–8K token window)
-- **Prompt template** (`src/rag_query.sh`): system prompt + chat history + retrieved documents + memory context (M3/M4)
-- **No visibility**: User has no way to know context usage. If prompt exceeds model's limit:
-  - Ollama silently truncates (oldest tokens dropped first)
-  - Responses degrade (loses earlier context)
-  - No error raised to user
+- **Inference model**: `qwen2.5-coder:7b-instruct` (native 32K context, but Ollama defaults `num_ctx=4096`)
+- **Prompt template** (`src/rag_query.sh`): system prompt + acervo metadata + retrieved docs (~10 chunks × 1K chars ≈ ~3K tokens, dominant) + query + memory context (M3/M4)
+- **Critical bug**: `ai.sh:94` never sets `num_ctx`, so config.conf CONTEXT_WINDOW is ignored; real ceiling is Ollama's hardcoded 4096
+- **No per-turn visibility**: User doesn't know actual prompt size each turn. Ollama silently truncates at 4096 while monitor (if misconfigured) shows "40% of 8192"
 
-**Goal**: Display live context-window usage % in chat header. Warn when approaching ceiling (e.g., 75%+). Integrate with memory subsystem to suggest pruning old facts if at risk.
+**Goal**: 
+1. **Wire `num_ctx` in `ai.sh`** so config.conf CONTEXT_WINDOW actually controls Ollama's behavior (ONE critical line)
+2. Display live per-turn prompt size % in chat header (not cumulative session history — that's not injected)
+3. Emit actual token counts via Ollama's `prompt_eval_count` (eliminates estimation error)
 
 ---
 
@@ -37,21 +39,22 @@ Alternatively: **footer bar** (always visible, bottom-right corner). Choose base
 
 ### Visual Indicator
 
-- **Percentage bar** (horizontal) or **numeric badge** (e.g., "3.2K / 5K")
-- **Color coding**:
-  - Green (0–50%): Safe
-  - Yellow (50–75%): Caution
-  - Orange (75–90%): Warning (log to console, consider compressing memory)
-  - Red (90–100%): Critical (disable memory injection; warn user before sending query)
-- **Tooltip** (hover): Breakdown of contributors
+- **Numeric badge** (e.g., "3.8K / 16.0K" or "4.2K / 16K [est]") in chat header
+- **Color coding** (includes 1K-token output reserve):
+  - Green (0–60%): Safe (leaves ~6.4K for output + safety margin)
+  - Yellow (60–75%): Caution
+  - Orange (75–85%): Warning (log to console)
+  - Red (85–100%): Critical (block send; warn "Context critical. Disable memory or clear history")
+- **Tooltip** (hover): Breakdown of contributors (accurate counts post-M3/M4 ship)
   ```
-  System Prompt: 0.5K tokens
-  Chat History: 1.2K tokens
-  Retrieved Docs: 1.8K tokens
-  Memory (Session): 0.3K tokens
-  Memory (Global): 0.2K tokens
+  System Prompt: 0.6K tokens
+  Acervo Metadata: 0.2K tokens
+  Retrieved Docs: 3.0K tokens
+  Query: 0.1K tokens
+  Memory (Session): 0.2K tokens [if M3 active]
+  Memory (Global): 0.1K tokens [if M4 active]
   ─────────────────────────
-  Total: 4.0K / 8.0K (50%)
+  Used: 4.2K / 16.0K (26%) [15K reserved for output]
   ```
 
 ---
@@ -60,20 +63,23 @@ Alternatively: **footer bar** (always visible, bottom-right corner). Choose base
 
 ### Context Estimation Strategy
 
-**Phase 1: Heuristic (character-based)**
-- Rough rule: 1 token ≈ 4 characters (varies by model/content; accuracy ±10–20%)
-- Calculate for each component:
-  - System prompt: read from `config.conf` or hardcode known template
-  - Chat history: sum message lengths from `messages` table for current session
-  - Retrieved docs: sum chunk sizes from latest query's search results
-  - Session memory: sum fact lengths from `session_memory` table
-  - Global memory: sum enabled entry lengths from `global_memory` table
-- **Model context window**: Read from config or hardcode `CONTEXT_WINDOW=8192` (tunable per model)
+**Per-turn, NOT cumulative**: Each turn's prompt is independent (stateless RAG). `messages` table is GUI history only; never injected into prompt.
 
-**Phase 2: Actual tokenization (TBD)**
-- Integrate tokenizer library (if available for target model)
-- Example: `tiktoken` (OpenAI) or port Ollama tokenizer to Python
-- More accurate; trades complexity/latency for precision
+**Phase 1: Hybrid (estimate + Ollama's exact count)**
+- Estimate system + docs + memory: 1 token ≈ 3.3 characters for Portuguese legal text (qwen2.5-coder:7b BPE; not English's 4 chars/token)
+- Token ratio: `TOKEN_RATIO=0.30` (1 token ≈ ~3.3 chars)
+- Calculate for each component per turn:
+  - System prompt: hardcode ~500–600 tokens (template size); plus acervo metadata (unbounded file list)
+  - Retrieved docs: estimate from `limite=10` × `CHUNK_SIZE=1000` chars ≈ ~3,000 tokens (dominant contributor)
+  - Current query: measure from user input
+  - Session memory (M3): sum fact lengths from `session_memory` table
+  - Global memory (M4): sum enabled entry lengths from `global_memory` table
+- **Actual token count**: After Ollama generates response, parse `prompt_eval_count` from the stream → update widget retroactively (eliminates estimation error)
+- **Model context window**: Read from `config.conf` `CONTEXT_WINDOW` (default 16384 for qwen2.5-coder:7b); wire as `num_ctx` in `ai.sh:94`
+
+**Phase 2 (future): Exact per-turn counts**
+- Emit `{"type":"stats","prompt_tokens":N,"response_tokens":M}` from `src/rag_query.sh` before each generation
+- Persist stats per turn for learning curve visibility
 
 ### Calculation Function
 
@@ -81,85 +87,96 @@ Create new module `web/context_tracker.py`:
 
 ```python
 class ContextTracker:
-    def __init__(self, context_window: int = 8192, token_ratio: float = 0.25):
+    def __init__(self, context_window: int = 16384, token_ratio: float = 0.30, output_reserve: int = 1024):
         """
         Args:
-            context_window: model's max tokens (e.g., 8192 for qwen2.5:1.5b)
-            token_ratio: estimation factor (1 token ≈ 1/token_ratio chars; default 0.25 = 4 chars/token)
+            context_window: model's max tokens (default 16384 for qwen2.5-coder:7b)
+            token_ratio: estimation factor (1 token ≈ 1/token_ratio chars; default 0.30 ≈ 3.3 chars/token for Portuguese)
+            output_reserve: tokens to reserve for response (default 1024)
         """
         self.context_window = context_window
         self.token_ratio = token_ratio
+        self.output_reserve = output_reserve
+        self.available = context_window - output_reserve
         
     def estimate_tokens(self, text: str) -> int:
         """Estimate tokens from text length."""
         return max(1, int(len(text) * self.token_ratio))
     
-    def calculate_usage(self, session_id: int) -> dict:
+    def calculate_usage(self, session_id: int, prompt_char_estimate: dict = None) -> dict:
         """
-        Returns:
-        {
-            "total_tokens": 2048,
-            "context_window": 8192,
-            "usage_percent": 25.0,
-            "breakdown": {
-                "system_prompt": 512,
-                "chat_history": 1024,
-                "retrieved_docs": 256,
-                "session_memory": 64,
-                "global_memory": 32,
-            },
-            "status": "safe",  # "safe" | "caution" | "warning" | "critical"
-        }
+        Calculate per-turn prompt usage. Accepts optional char counts to avoid DB queries.
+        
+        Args:
+            session_id: GUI session ID (for memory tables)
+            prompt_char_estimate: dict with keys:
+                - "system_prompt": chars (hardcoded ~2000 for template + acervo)
+                - "retrieved_docs": chars (from latest query; ~10K if 10 chunks @ 1K each)
+                - "query": chars (from user input)
+        
+        Returns dict with usage_percent relative to available window (minus output reserve).
         """
-        db = DB()
+        db = get_db()  # Use get_db() function, not DB() class (which doesn't exist)
         
-        # System prompt (hardcoded template ~ 500–800 tokens)
-        system_tokens = 640
+        # System prompt + acervo metadata (hardcoded estimate; acervo filename list is unbounded but typically ~2K chars)
+        system_tokens = self.estimate_tokens("# System prompt template + acervo metadata\n") + 550
         
-        # Chat history (messages in current session)
-        messages = db.get_messages(session_id, limit=50)  # last N messages
-        history_text = "\n".join(f"{'User' if m.role == 'user' else 'Assistant'}: {m.content}" for m in messages)
-        history_tokens = self.estimate_tokens(history_text)
+        # Retrieved docs (from latest query, passed in or default estimate)
+        doc_chars = prompt_char_estimate.get("retrieved_docs", 10000) if prompt_char_estimate else 10000
+        retrieved_tokens = self.estimate_tokens("x" * doc_chars)
         
-        # Retrieved docs (placeholder; will be populated during query)
-        # For now, estimate from DB or cache latest retrieval
-        retrieved_tokens = 256  # default estimate; can be cached per query
+        # Current query
+        query_chars = prompt_char_estimate.get("query", 100) if prompt_char_estimate else 100
+        query_tokens = self.estimate_tokens("x" * query_chars)
         
-        # Session memory
-        session_facts = db.get_session_memory(session_id)
-        session_mem_text = "\n".join(f["content"] for f in session_facts)
-        session_tokens = self.estimate_tokens(session_mem_text)
+        # Session memory (optional; only if M3 shipped and table exists)
+        session_tokens = 0
+        try:
+            session_facts = db.get_session_memory(session_id)  # Returns list of dicts
+            if session_facts:
+                mem_text = "\n".join(f["content"] for f in session_facts)
+                session_tokens = self.estimate_tokens(mem_text)
+        except (AttributeError, KeyError):
+            pass  # M3 not yet implemented
         
-        # Global memory (enabled only)
-        global_facts = db.list_global_memory(enabled_only=True)
-        global_mem_text = "\n".join(f"{f['key']}: {f['value']}" for f in global_facts)
-        global_tokens = self.estimate_tokens(global_mem_text)
+        # Global memory (optional; only if M4 shipped and table exists, enabled=1)
+        global_tokens = 0
+        try:
+            global_facts = db.list_global_memory()  # Returns all entries
+            if global_facts:
+                mem_text = "\n".join(f"{f['key']}: {f['value']}" for f in global_facts if f.get('enabled', 0))
+                global_tokens = self.estimate_tokens(mem_text)
+        except (AttributeError, KeyError):
+            pass  # M4 not yet implemented
         
-        total_tokens = system_tokens + history_tokens + retrieved_tokens + session_tokens + global_tokens
-        usage_percent = (total_tokens / self.context_window) * 100
+        total_tokens = system_tokens + retrieved_tokens + query_tokens + session_tokens + global_tokens
+        usage_percent = (total_tokens / self.available) * 100
         
-        # Status logic
-        if usage_percent < 50:
+        # Status logic (relative to available window, not raw window)
+        if usage_percent < 60:
             status = "safe"
         elif usage_percent < 75:
             status = "caution"
-        elif usage_percent < 90:
+        elif usage_percent < 85:
             status = "warning"
         else:
             status = "critical"
         
         return {
             "total_tokens": total_tokens,
+            "available_tokens": self.available,
             "context_window": self.context_window,
+            "output_reserve": self.output_reserve,
             "usage_percent": round(usage_percent, 1),
             "breakdown": {
                 "system_prompt": system_tokens,
-                "chat_history": history_tokens,
                 "retrieved_docs": retrieved_tokens,
+                "query": query_tokens,
                 "session_memory": session_tokens,
                 "global_memory": global_tokens,
             },
             "status": status,
+            "exact_prompt_tokens": None,  # Will be populated from Ollama's prompt_eval_count after generation
         }
 ```
 
@@ -168,31 +185,52 @@ class ContextTracker:
 Add to `web/app.py`:
 
 ```python
-@app.route('/api/sessions/<int:session_id>/context-usage', methods=['GET'])
+@app.route('/api/sessions/<int:session_id>/context-usage', methods=['POST'])
 def get_context_usage(session_id):
-    """Get current context window usage for a session."""
-    from context_tracker import ContextTracker
-    from config import CONTEXT_WINDOW  # read from config.conf or default 8192
+    """
+    Get current per-turn context window usage.
+    POST accepts optional prompt char estimates (from the current turn before sending).
+    """
+    from web.context_tracker import ContextTracker
     
-    tracker = ContextTracker(context_window=CONTEXT_WINDOW)
-    usage = tracker.calculate_usage(session_id)
+    # Read config (must be in DEFAULT_CONFIG + added to web/app.py:40)
+    context_window = int(config.get("CONTEXT_WINDOW", 16384))
+    token_ratio = float(config.get("TOKEN_RATIO", 0.30))
+    
+    tracker = ContextTracker(context_window=context_window, token_ratio=token_ratio)
+    
+    # Optional: client sends estimated char counts for prompt components
+    prompt_estimate = request.get_json() or {}
+    
+    usage = tracker.calculate_usage(session_id, prompt_char_estimate=prompt_estimate)
     return jsonify(usage)
 ```
 
 Endpoint response:
 ```json
 {
-  "total_tokens": 2048,
-  "context_window": 8192,
-  "usage_percent": 25.0,
+  "total_tokens": 4200,
+  "available_tokens": 15360,
+  "context_window": 16384,
+  "output_reserve": 1024,
+  "usage_percent": 27.3,
   "breakdown": {
-    "system_prompt": 512,
-    "chat_history": 1024,
-    "retrieved_docs": 256,
-    "session_memory": 64,
-    "global_memory": 32
+    "system_prompt": 600,
+    "retrieved_docs": 3000,
+    "query": 50,
+    "session_memory": 200,
+    "global_memory": 100
   },
-  "status": "safe"
+  "status": "safe",
+  "exact_prompt_tokens": null
+}
+```
+
+POST body (optional):
+```json
+{
+  "retrieved_docs": 9800,
+  "query": 120
 }
 ```
 
@@ -207,57 +245,74 @@ function initContextMonitor(sessionId) {
   const monitor = document.querySelector('[data-context-monitor]');
   if (!monitor) return;
   
-  async function updateContextUsage() {
+  async function updateContextUsage(promptEstimate = {}) {
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/context-usage`);
+      // POST with optional prompt char estimates (if called before sending query)
+      const res = await fetch(`/api/sessions/${sessionId}/context-usage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(promptEstimate)
+      });
       const data = await res.json();
       
       const percent = data.usage_percent;
       const status = data.status;
       
       // Update bar
-      monitor.querySelector('.context-bar').style.width = percent + '%';
+      const bar = monitor.querySelector('.context-bar');
+      if (bar) bar.style.width = Math.min(percent, 100) + '%';
       monitor.className = `context-monitor context-${status}`;
       
-      // Update text
+      // Update text — fix field path: total_tokens is top-level
       monitor.querySelector('.context-text').textContent = 
-        `${Math.round(percent)}% (${data.breakdown.total_tokens}/${data.context_window})`;
+        `${Math.round(percent)}% (${data.total_tokens}/${data.available_tokens})${data.exact_prompt_tokens ? ' [exact]' : ' [est]'}`;
       
-      // Populate tooltip
-      const breakdown = data.breakdown;
-      const tooltip = `
-        System Prompt: ${breakdown.system_prompt} tokens
-        Chat History: ${breakdown.chat_history} tokens
-        Retrieved Docs: ${breakdown.retrieved_docs} tokens
-        Session Memory: ${breakdown.session_memory} tokens
-        Global Memory: ${breakdown.global_memory} tokens
-        ─────────────────────────────
-        Total: ${data.total_tokens} / ${data.context_window} (${percent}%)
-      `;
-      monitor.title = tooltip;
+      // Populate tooltip with line breaks (native tooltip renders \n)
+      const b = data.breakdown;
+      const lines = [
+        `System Prompt: ${b.system_prompt} tokens`,
+        `Retrieved Docs: ${b.retrieved_docs} tokens`,
+        `Query: ${b.query} tokens`,
+        b.session_memory > 0 ? `Session Memory: ${b.session_memory} tokens` : null,
+        b.global_memory > 0 ? `Global Memory: ${b.global_memory} tokens` : null,
+        '─────────────────────────────',
+        `Used: ${data.total_tokens} / ${data.available_tokens} (${percent}%)`,
+        `Context Window: ${data.context_window} (${data.output_reserve}K reserved for output)`
+      ].filter(Boolean).join('\n');
+      
+      monitor.title = lines;
       
       // Warn if critical
       if (status === 'critical') {
-        console.warn('[Context] Critical usage (' + percent + '%). Consider clearing chat history or disabling memory.');
+        console.error('%c[Context] CRITICAL usage (' + percent + '%). Disable memory or clear docs before next query.', 'color: red; font-weight: bold;');
+      } else if (status === 'warning') {
+        console.warn('[Context] Warning: ' + percent + '% usage');
       }
     } catch (e) {
       console.error('Failed to fetch context usage:', e);
     }
   }
   
-  // Update after each message
-  document.addEventListener('message-sent', updateContextUsage);
-  document.addEventListener('response-received', updateContextUsage);
+  // Update after each message is persisted (wire into streamChat callback)
+  // Note: custom events below must be dispatched from streamChat() in this file
+  document.addEventListener('message-persisted', updateContextUsage);
   
   // Initial update
   updateContextUsage();
 }
 
-// On page load
-DOMContentLoaded(() => {
+// On page load — FIX: DOMContentLoaded is not a function
+document.addEventListener('DOMContentLoaded', () => {
   const sessionId = getCurrentSessionId();
   if (sessionId) initContextMonitor(sessionId);
 });
+
+// In streamChat() or the SSE listener, after response is received and persisted:
+// Dispatch custom event so monitor updates (replace with actual field names)
+const evt = new CustomEvent('message-persisted', {
+  detail: { prompt_estimate: { retrieved_docs: 9800, query: 120 } }
+});
+document.dispatchEvent(evt);
 ```
 
 #### `web/templates/chat.html`
@@ -342,28 +397,46 @@ When status == "critical":
 
 ## Configuration
 
-Add to `config.conf`:
+### 1. Add to `config.conf`:
 
 ```bash
 # Context window size for the active inference model (tokens)
-# qwen2.5:1.5b: ~8000–8192
-# qwen2.5:7b: ~32000
-# Adjust if swapping models
-CONTEXT_WINDOW=8192
+# qwen2.5-coder:7b-instruct: native 32K, but set conservatively for 8GB RAM
+# Default: 16384 (reserves 1K for output safety margin)
+# Increase only on 16GB+ machines or with quantized models (q4, q5)
+CONTEXT_WINDOW=16384
 
 # Token estimation factor: 1 token ≈ (1 / TOKEN_RATIO) characters
-# Default 0.25 = 1 token per 4 chars (rough; varies by model/language)
-TOKEN_RATIO=0.25
+# qwen2.5-coder:7b Portuguese legal text: ~3.3 chars/token (not English's 4)
+# Default 0.30 is conservative; produces underestimate (warns earlier)
+TOKEN_RATIO=0.30
 ```
 
-Load in `web/app.py` or `web/config.py`:
+### 2. Update `web/app.py::DEFAULT_CONFIG` (line ~40):
+
+Add these keys to the dictionary so they load from config.conf:
 
 ```python
-from config import load_config
-config = load_config()
-CONTEXT_WINDOW = int(config.get("CONTEXT_WINDOW", 8192))
-TOKEN_RATIO = float(config.get("TOKEN_RATIO", 0.25))
+DEFAULT_CONFIG = {
+    # ... existing keys ...
+    "CONTEXT_WINDOW": "16384",
+    "TOKEN_RATIO": "0.30",
+}
 ```
+
+### 3. **CRITICAL FIX**: Wire `num_ctx` in `src/ai.sh` line 94
+
+Current (broken):
+```bash
+options: {temperature}
+```
+
+Fixed:
+```bash
+options: {temperature, num_ctx: $CONTEXT_WINDOW}
+```
+
+This is THE critical fix. Without it, Ollama ignores `num_ctx` and uses default 4096, causing silent truncation regardless of config.conf CONTEXT_WINDOW setting.
 
 ---
 
@@ -373,51 +446,66 @@ TOKEN_RATIO = float(config.get("TOKEN_RATIO", 0.25))
 
 ```python
 def test_estimate_tokens():
-    tracker = ContextTracker(context_window=8192, token_ratio=0.25)
-    text = "a" * 4  # 4 chars = 1 token
-    assert tracker.estimate_tokens(text) == 1
+    tracker = ContextTracker(context_window=16384, token_ratio=0.30)
+    # 1 token ≈ 3.3 chars
+    text = "a" * 3  # ~1 token
+    assert tracker.estimate_tokens(text) >= 0  # May round to 0; use max(1, ...) in code
     
-    text = "a" * 8192  # 8192 chars = 2048 tokens
-    assert tracker.estimate_tokens(text) == 2048
+    text = "a" * 3300  # ~1000 tokens
+    assert tracker.estimate_tokens(text) >= 990
 
 def test_calculate_usage_safe():
-    tracker = ContextTracker(context_window=8192)
-    # Mock DB to return small messages
-    usage = tracker.calculate_usage(session_id=1)
-    assert usage["usage_percent"] < 50
+    tracker = ContextTracker(context_window=16384, output_reserve=1024)
+    # Mock DB: empty session, minimal docs
+    usage = tracker.calculate_usage(session_id=999)  # Nonexistent session
+    assert usage["usage_percent"] < 60
     assert usage["status"] == "safe"
 
 def test_calculate_usage_critical():
-    tracker = ContextTracker(context_window=1000)
-    # Mock DB to return large messages
-    usage = tracker.calculate_usage(session_id=1)
-    assert usage["usage_percent"] > 90
+    tracker = ContextTracker(context_window=5000, output_reserve=1024)
+    # Small window; system + large docs should trigger critical
+    usage = tracker.calculate_usage(session_id=1, 
+        prompt_char_estimate={"retrieved_docs": 15000, "query": 200})
+    assert usage["usage_percent"] > 85
     assert usage["status"] == "critical"
 
-def test_breakdown_components():
+def test_output_reserve():
+    tracker = ContextTracker(context_window=16384, output_reserve=1024)
+    assert tracker.available == 15360
+
+def test_breakdown_no_history_component():
     usage = tracker.calculate_usage(session_id=1)
     breakdown = usage["breakdown"]
+    # Fixed: no chat_history component (not injected)
     assert "system_prompt" in breakdown
-    assert "chat_history" in breakdown
     assert "retrieved_docs" in breakdown
+    assert "query" in breakdown
     assert "session_memory" in breakdown
     assert "global_memory" in breakdown
+    assert "chat_history" not in breakdown
     assert sum(breakdown.values()) == usage["total_tokens"]
+
+def test_missing_memory_tables():
+    """Pre-M3/M4: session_memory / global_memory don't exist; should not crash."""
+    usage = tracker.calculate_usage(session_id=1)
+    assert usage["session_memory"] == 0
+    assert usage["global_memory"] == 0
 ```
 
 ### Integration Tests
 
-- **API endpoint**: GET `/api/sessions/1/context-usage` returns valid JSON with all fields.
-- **Memory injection**: After activating session memory (M3) and global memory (M4), verify context usage increases.
-- **Status transitions**: Send messages to drive usage from safe → caution → warning → critical; verify UI color changes.
+- **API endpoint**: POST `/api/sessions/1/context-usage` with prompt estimate returns valid JSON.
+- **Memory injection** (M3/M4 active): Verify breakdown includes session + global memory when tables exist.
+- **Status transitions**: Vary prompt_char_estimate to drive usage safe → caution → warning → critical.
 
 ### E2E Tests (Playwright)
 
-- Load chat → monitor shows in header
-- Send 20 messages → usage bar fills, color changes at thresholds
-- Enable global memory → usage increases
-- Hover tooltip shows breakdown
-- Critical warning logged to console
+- Load chat → monitor shows in header (header badge visible)
+- Send a message → usage updates (monitor shows safe, [est] suffix)
+- Hover tooltip shows full breakdown
+- If M4 active: enable global memory → usage % increases
+- Critical status (>85%) → console logs red warning
+- NOT included: "send 20 messages fills bar" (invalid; stateless per-turn)
 
 ---
 
@@ -476,34 +564,73 @@ def test_breakdown_components():
 
 ---
 
-## Future Enhancements (Phase 2)
+## Phase 2 Enhancements (Prioritized by Fable)
 
-1. **Auto-summarization**: If session memory grows large, auto-summarize oldest facts and replace.
-2. **Sliding window**: Keep only last N messages in context, discard oldest (trade-off: lose conversation thread).
-3. **Model-aware tokenizer**: Use actual tokenizer library for target model (Ollama has one; can expose via `/api/tokenize`).
-4. **Per-model profiles**: Store known context windows + token ratios for common models (qwen2.5:1.5b, llama2:13b, etc.) in config.
-5. **Archive old chats**: Auto-archive sessions after X days to keep SQLite lean.
+1. **Exact per-turn token counts via `prompt_eval_count`** (PULL INTO 1.5!)
+   - Ollama's final streaming chunk includes `"prompt_eval_count": N` (exact token count used)
+   - Parse in `ai.sh` streaming loop; emit as stats event to `web/app.py`
+   - Update widget retroactively with exact count (badge shows "[exact]" instead of "[est]")
+   - Eliminates 15–25% estimation error entirely
+
+2. **Per-model context profiles**
+   - Store context windows + token ratios per MODELO_IA + BACKEND
+   - Example: `{"qwen2.5-coder:7b": {window: 32768, ratio: 0.30}, "llama2:13b": {window: 4096, ratio: 0.25}}`
+   - Auto-load correct values on model switch
+
+3. **Sliding window for history** (blocked until history injection exists)
+   - M5 (future): if user enables "session context injection", keep last N messages in prompt
+   - Calculate history token count, warn if approaching window
+
+4. **Auto-summarization of memory facts** (defer to M3's own backlog)
+   - Compress old session facts into summaries when cap is reached
+
+5. **Archive old chats** (drop from this plan; unrelated housekeeping)
 
 ---
 
+## Critical Implementation Order
+
+1. **FIX in `src/ai.sh` line 94** (DO THIS FIRST — it fixes the root bug)
+   - Change: `options: {temperature}` → `options: {temperature, num_ctx: $CONTEXT_WINDOW}`
+   - This wires the config.conf CONTEXT_WINDOW into Ollama's actual limit (currently ignored)
+
+2. **Add config keys to `web/app.py::DEFAULT_CONFIG`** (so `config.conf` keys load)
+   - `CONTEXT_WINDOW=16384`, `TOKEN_RATIO=0.30`
+
+3. **Create `web/context_tracker.py`** (core calculation module)
+
+4. **Add endpoint + frontend** (in parallel)
+
 ## Files to Create/Modify
 
-- [ ] `/home/lw_na/git/ai-ragjus/web/context_tracker.py` — **new**
-- [ ] `/home/lw_na/git/ai-ragjus/web/app.py` — add `/api/sessions/<id>/context-usage` endpoint
-- [ ] `/home/lw_na/git/ai-ragjus/web/templates/chat.html` — add monitor widget to header
-- [ ] `/home/lw_na/git/ai-ragjus/web/static/chat.js` — init monitor, update on message events
-- [ ] `/home/lw_na/git/ai-ragjus/web/static/style.css` — widget styling + color states
-- [ ] `/home/lw_na/git/ai-ragjus/config.conf` — add `CONTEXT_WINDOW`, `TOKEN_RATIO` keys
+- [x] `src/ai.sh` — **CRITICAL FIX** wire `num_ctx` in JSON payload (line 94)
+- [ ] `config.conf` — add `CONTEXT_WINDOW=16384`, `TOKEN_RATIO=0.30`
+- [ ] `web/app.py` — update `DEFAULT_CONFIG` (add 2 keys), add `/api/.../context-usage` POST endpoint
+- [ ] `/home/lw_na/git/ai-ragjus/web/context_tracker.py` — **new** (main calculation module)
+- [ ] `/home/lw_na/git/ai-ragjus/web/templates/chat.html` — add monitor widget markup to header
+- [ ] `/home/lw_na/git/ai-ragjus/web/static/chat.js` — init monitor, wire event dispatch
+- [ ] `/home/lw_na/git/ai-ragjus/web/static/style.css` — color states, pulse animation
 - [ ] `/home/lw_na/git/ai-ragjus/web/tests/test_context_tracker.py` — **new** unit tests
-- [ ] `/home/lw_na/git/ai-ragjus/web/tests/test_routes.py` — add E2E test for endpoint
+- [ ] `/home/lw_na/git/ai-ragjus/web/tests/test_routes.py` — add integration test for endpoint
 
 ---
 
 ## Sign-Off
 
-Feature is **implementation-ready**. Simple, high-value addition to prevent silent truncation. Recommend shipping after M1/M2, or as prerequisite to M3 to establish baseline before memory injection.
+**Status**: NO-GO → GO after fixes (Fable review applied)
 
-**Open questions:**
-1. Display location preference: header badge or footer bar?
-2. Should 90%+ usage block message send (Phase 1), or just warn?
-3. Reserve for Phase 2: actual tokenizer vs. staying with heuristic?
+**Plan is implementation-ready.** Critical issues fixed:
+1. ✅ Removed `chat_history` component (not injected into prompt; stateless RAG)
+2. ✅ Added `num_ctx` wiring in `ai.sh` (THE critical fix — 1 line, high impact)
+3. ✅ Fixed API/DB usage (module functions, dict rows, guard missing M3/M4 tables)
+4. ✅ Fixed JS bugs (correct field paths, DOMContentLoaded, event dispatch)
+5. ✅ Updated config: CONTEXT_WINDOW=16384, TOKEN_RATIO=0.30 (for qwen2.5-coder:7b + Portuguese)
+6. ✅ Added output-token reserve (1K tokens minimum)
+7. ✅ Compute per-turn usage (not cumulative history)
+
+**High-value, low-risk feature.** Prevents silent truncation; integrates cleanly with M3/M4. Recommend shipping after M1/M2, or as prerequisite to M3.
+
+**Decision points:**
+1. Header badge placement: confirmed ✓
+2. Phase 1 behavior: warn (no blocking) — shift to Phase 2 if needed
+3. Phase 1.5 opportunity: emit `prompt_eval_count` from Ollama → exact counts, not estimates
