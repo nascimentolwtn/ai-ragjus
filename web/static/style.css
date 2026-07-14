@@ -1163,3 +1163,58 @@ html, body {
     color: var(--text-dim);
     font-style: italic;
 }
+
+/* ===== Context window monitor (chat header) ===== */
+
+.context-monitor {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: var(--radius);
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: rgba(128, 128, 128, 0.08);
+    border: 1px solid var(--border);
+    cursor: help;
+    white-space: nowrap;
+}
+
+.context-bar-track {
+    width: 46px;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--bg-alt);
+    overflow: hidden;
+}
+
+.context-bar {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.2s ease, background 0.2s ease;
+}
+
+.context-monitor.context-safe { border-color: var(--accent-dim); color: var(--accent); }
+.context-monitor.context-safe .context-bar { background: var(--accent); }
+
+.context-monitor.context-caution { border-color: #e8a33d; color: #e8a33d; }
+.context-monitor.context-caution .context-bar { background: #e8a33d; }
+
+.context-monitor.context-warning { border-color: #e8703d; color: #e8703d; }
+.context-monitor.context-warning .context-bar { background: #e8703d; }
+
+.context-monitor.context-critical {
+    border-color: var(--error);
+    color: #fff;
+    background: var(--error);
+    font-weight: 700;
+    animation: context-pulse 1s infinite;
+}
+
+.context-monitor.context-critical .context-bar { background: #fff; }
+
+@keyframes context-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.75; }
+}

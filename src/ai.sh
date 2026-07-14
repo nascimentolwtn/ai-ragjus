@@ -90,8 +90,13 @@ perguntar_ollama() {
         return 1
     fi
 
+    # CONTEXT_WINDOW vira num_ctx no payload: sem isso o Ollama ignora a
+    # config e usa o padrão de 4096, truncando o prompt silenciosamente
+    # (ver .claude/plans/flask_gui_context_window_monitor.md).
+    local ctx_window="${CONTEXT_WINDOW:-16384}"
+
     local json_payload
-    json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$prompt" --argjson temp "$TEMPERATURA" '{"model": $model, "prompt": $prompt, "stream": true, "options": {"temperature": $temp}}')
+    json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$prompt" --argjson temp "$TEMPERATURA" --argjson ctx "$ctx_window" '{"model": $model, "prompt": $prompt, "stream": true, "options": {"temperature": $temp, "num_ctx": $ctx}}')
 
     while true; do
         local response_started=false
@@ -146,6 +151,16 @@ perguntar_ollama() {
                         echo -ne "${GREEN}${token}${NC}"
                     fi
                     response_started=true
+                fi
+
+                # Última linha do streaming (done:true) traz as contagens
+                # exatas de tokens usadas pelo Ollama - emite como evento
+                # "stats" para o monitor de janela de contexto da interface
+                # web substituir a estimativa por caracteres pelo valor real.
+                local is_done
+                is_done=$(echo "$line" | jq -r '.done // false' 2>/dev/null || echo "false")
+                if [ "$is_done" = "true" ] && [ "$NON_INTERACTIVE" = "1" ]; then
+                    echo "$line" | jq -c '{type:"stats", prompt_eval_count: (.prompt_eval_count // null), eval_count: (.eval_count // null)}' 2>/dev/null || true
                 fi
             fi
         done < <(curl -s -N -X POST "$OLLAMA_URL/api/generate" \

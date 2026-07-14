@@ -591,6 +591,7 @@
                 });
                 markActiveSession(sessionId);
                 loadSessionScope(sessionId);
+                updateContextUsage({});
             })
             .catch(function (err) {
                 addMessage("error", "Falha ao carregar conversa: " + err.message);
@@ -608,6 +609,12 @@
             el.checked = false;
         });
         updateScopePills([]);
+        if (contextMonitorEl) {
+            contextMonitorEl.className = "context-monitor";
+            contextBarEl.style.width = "0%";
+            contextTextEl.textContent = "…";
+            contextMonitorEl.title = "";
+        }
         inputEl.focus();
     });
 
@@ -657,6 +664,7 @@
                     // Scope was persisted server-side from `selected_docs` above
                     // (or is empty); the pending buffer is no longer needed.
                     pendingScope = [];
+                    updateContextUsage({ query: query.length });
                 } else if (event.type === "token") {
                     accumulated += event.content || "";
                     assistantContentEl.dataset.raw = accumulated;
@@ -664,6 +672,10 @@
                     scrollToBottom();
                 } else if (event.type === "sources") {
                     sources = event.content || [];
+                    // Rough retrieved-docs char estimate (CHUNK_SIZE default ~1000/chunk).
+                    updateContextUsage({ query: query.length, retrieved_docs: sources.length * 1000 });
+                } else if (event.type === "stats") {
+                    updateContextUsageExact(event.prompt_eval_count);
                 } else if (event.type === "error") {
                     sawError = true;
                     accumulated += (accumulated ? "\n" : "") + "[Erro] " + event.content;
@@ -1010,6 +1022,77 @@
             });
             toggleScopeBtn.setAttribute("aria-expanded", String(!isExpanded));
         });
+    }
+
+    // --- Context window monitor (M5) ----------------------------------------
+    // Per-turn prompt size vs. the model's num_ctx (CONTEXT_WINDOW). Estimated
+    // from char counts until the "stats" SSE event (Ollama's exact
+    // prompt_eval_count) arrives and replaces the estimate for that turn.
+    const contextMonitorEl = document.getElementById("context-monitor");
+    const contextBarEl = document.getElementById("context-bar");
+    const contextTextEl = document.getElementById("context-text");
+    let lastContextUsage = null;
+
+    function renderContextUsage(data, exact) {
+        if (!contextMonitorEl) return;
+        lastContextUsage = data;
+
+        const percent = Math.min(data.usage_percent, 100);
+        contextBarEl.style.width = percent + "%";
+        contextMonitorEl.className = "context-monitor context-" + data.status;
+
+        const kFmt = function (n) { return (n / 1000).toFixed(1) + "K"; };
+        contextTextEl.textContent =
+            kFmt(data.total_tokens) + "/" + kFmt(data.available_tokens) +
+            " (" + Math.round(data.usage_percent) + "%)" + (exact ? " [exato]" : " [est]");
+
+        const b = data.breakdown;
+        const lines = [
+            "Prompt do sistema: ~" + b.system_prompt + " tokens",
+            "Documentos recuperados: ~" + b.retrieved_docs + " tokens",
+            "Pergunta: ~" + b.query + " tokens",
+        ];
+        if (b.session_memory > 0) lines.push("Memória da conversa: ~" + b.session_memory + " tokens");
+        if (b.global_memory > 0) lines.push("Memória global: ~" + b.global_memory + " tokens");
+        lines.push("─────────────────────");
+        lines.push("Usado: " + data.total_tokens + " / " + data.available_tokens +
+            " (" + data.usage_percent + "%)");
+        lines.push("Janela: " + data.context_window + " tokens (" +
+            data.output_reserve + " reservados p/ resposta)");
+        contextMonitorEl.title = lines.join("\n");
+
+        if (data.status === "critical") {
+            console.error("%c[Contexto] Uso CRÍTICO (" + data.usage_percent + "%). " +
+                "Considere desativar memória ou reduzir o escopo de documentos.",
+                "color: red; font-weight: bold;");
+        } else if (data.status === "warning") {
+            console.warn("[Contexto] Aviso: uso em " + data.usage_percent + "%.");
+        }
+    }
+
+    function updateContextUsage(promptEstimate) {
+        if (!contextMonitorEl || !currentSessionId) return;
+        fetch("/api/sessions/" + currentSessionId + "/context-usage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(promptEstimate || {}),
+        })
+            .then(function (r) { return r.json(); })
+            .then(function (data) { renderContextUsage(data, false); })
+            .catch(function (err) { console.error("Falha ao calcular uso de contexto:", err); });
+    }
+
+    function updateContextUsageExact(promptEvalCount) {
+        if (!contextMonitorEl || !lastContextUsage || typeof promptEvalCount !== "number") return;
+        const usage = Object.assign({}, lastContextUsage, {
+            total_tokens: promptEvalCount,
+            usage_percent: Math.round((promptEvalCount / lastContextUsage.available_tokens) * 1000) / 10,
+        });
+        if (usage.usage_percent < 60) usage.status = "safe";
+        else if (usage.usage_percent < 75) usage.status = "caution";
+        else if (usage.usage_percent < 85) usage.status = "warning";
+        else usage.status = "critical";
+        renderContextUsage(usage, true);
     }
 
     // --- Session memory disclosure (M3 mini-UI) -----------------------------

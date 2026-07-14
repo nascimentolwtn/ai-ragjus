@@ -24,6 +24,7 @@ carregar_configuracoes() {
     CHUNK_SIZE=1000
     CHUNK_OVERLAP=200
     TEMPERATURA=0
+    CONTEXT_WINDOW=16384
     RAGSEC_MODE=0
     AUDIT_RETENTION_DIAS=365
 
@@ -48,6 +49,7 @@ carregar_configuracoes() {
                 CHUNK_SIZE) CHUNK_SIZE="$value" ;;
                 CHUNK_OVERLAP) CHUNK_OVERLAP="$value" ;;
                 TEMPERATURA) TEMPERATURA="$value" ;;
+                CONTEXT_WINDOW) CONTEXT_WINDOW="$value" ;;
                 RAGSEC_MODE) RAGSEC_MODE="$value" ;;
                 AUDIT_RETENTION_DIAS) AUDIT_RETENTION_DIAS="$value" ;;
             esac
@@ -55,7 +57,7 @@ carregar_configuracoes() {
     fi
 
     # Exporta para os outros scripts
-    export PASTA_ALVO CACHE_DIR OLLAMA_URL MODELO_IA MODELO_EMBEDDING MAX_FILE_SIZE_MB CHUNK_SIZE CHUNK_OVERLAP TEMPERATURA RAGSEC_MODE AUDIT_RETENTION_DIAS
+    export PASTA_ALVO CACHE_DIR OLLAMA_URL MODELO_IA MODELO_EMBEDDING MAX_FILE_SIZE_MB CHUNK_SIZE CHUNK_OVERLAP TEMPERATURA CONTEXT_WINDOW RAGSEC_MODE AUDIT_RETENTION_DIAS
 }
 
 # Atualiza uma chave de configuração no config.conf
@@ -80,6 +82,7 @@ atualizar_configuracao() {
         CHUNK_SIZE) CHUNK_SIZE="$valor" ;;
         CHUNK_OVERLAP) CHUNK_OVERLAP="$valor" ;;
         TEMPERATURA) TEMPERATURA="$valor" ;;
+        CONTEXT_WINDOW) CONTEXT_WINDOW="$valor" ;;
         RAGSEC_MODE) RAGSEC_MODE="$valor" ;;
         AUDIT_RETENTION_DIAS) AUDIT_RETENTION_DIAS="$valor" ;;
     esac

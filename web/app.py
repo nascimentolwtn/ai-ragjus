@@ -28,6 +28,7 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import db  # noqa: E402
 import memory  # noqa: E402
+from context_tracker import ContextTracker  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAG_QUERY_SCRIPT = BASE_DIR / "src" / "rag_query.sh"
@@ -218,6 +219,30 @@ def api_set_session_scope(session_id):
                     "count": len(selected_docs)})
 
 
+@app.route("/api/sessions/<int:session_id>/context-usage", methods=["POST"])
+def api_context_usage(session_id):
+    """Per-turn context window usage estimate (see web/context_tracker.py).
+    Body (optional): {"retrieved_docs": <chars>, "query": <chars>}.
+    """
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+
+    config = load_config()
+    try:
+        context_window = int(config.get("CONTEXT_WINDOW", 16384))
+    except (TypeError, ValueError):
+        context_window = 16384
+    try:
+        token_ratio = float(config.get("TOKEN_RATIO", 0.30))
+    except (TypeError, ValueError):
+        token_ratio = 0.30
+
+    tracker = ContextTracker(context_window=context_window, token_ratio=token_ratio)
+    prompt_estimate = request.get_json(silent=True) or {}
+    usage = tracker.calculate_usage(session_id, prompt_char_estimate=prompt_estimate)
+    return jsonify(usage)
+
+
 @app.route("/api/sessions/<int:session_id>/memory", methods=["GET"])
 def api_get_session_memory(session_id):
     """M3 mini-UI: list facts remembered for this session."""
@@ -316,6 +341,10 @@ def api_chat():
                     yield _sse(event)
                 elif etype == "error":
                     saw_error = True
+                    yield _sse(event)
+                elif etype == "stats":
+                    # Exact prompt_eval_count from Ollama; frontend uses this
+                    # to replace the char-based estimate retroactively.
                     yield _sse(event)
                 elif etype == "done":
                     yield _sse(event)

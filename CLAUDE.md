@@ -135,6 +135,9 @@ pip install -r requirements.txt
 - Dark/light theme (respects system preference)
 - Same RAG backend as CLI (shares vector store, models, config)
 - **Network accessible**: connect from any device on the local network using the machine's IP address
+- Lazy-loaded, paginated chat sidebar (infinite scroll) with rename/delete (3-dots menu)
+- Per-chat memory (auto-extracted facts injected into follow-up turns) + global cross-session memory with a `/settings` inspector page (manual + auto-learned facts, enable/disable, CRUD)
+- Live per-turn context window monitor in the chat header (estimated, then reconciled with Ollama's exact `prompt_eval_count`)
 
 **Configuration:**
 - Flask reads `config.conf` at startup (same as CLI)
@@ -158,6 +161,8 @@ Edit `config.conf` for:
 - `CHUNK_OVERLAP`: Overlap between chunks (default: 200 chars)
 - `TEMPERATURA`: Model temperature (default: 0 for deterministic legal responses)
 - `BACKEND`: LLM backend (default: `ollama`; also supports `llamacpp` for llama.cpp at localhost:8000)
+- `CONTEXT_WINDOW`: Ollama `num_ctx` in tokens (default: 16384). Without this, Ollama silently truncates prompts at its own default of 4096 regardless of this file — wired in `src/ai.sh::perguntar_ollama`.
+- `TOKEN_RATIO`: Web GUI's char→token estimation factor for the context window monitor (default: 0.30, ≈3.3 chars/token for Portuguese legal text). CLI-only usage is unaffected.
 
 **Backend Selection:**
 - Use menu option 6 → Advanced Configuration → "Alterar Backend de Inferência" to switch
