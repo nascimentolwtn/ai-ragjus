@@ -2,6 +2,19 @@
 # =========================================================================
 # AI-RAGJus - Módulo de Banco de Dados Vetorial (SQLite + Busca de Cosseno)
 # =========================================================================
+#
+# Teste manual do escopo de documentos (SCOPE_DOCS), a partir da raiz do repo:
+#
+#   # Baseline (sem escopo — comportamento atual)
+#   NON_INTERACTIVE=1 bash src/rag_query.sh "uma pergunta qualquer" | jq '.sources | length' 2>/dev/null
+#
+#   # Escopo para um único documento (deve retornar apenas trechos desse arquivo)
+#   DOC=$(sqlite3 .cache_vetorial/rag_store.db "SELECT DISTINCT caminho_arquivo FROM document_chunks LIMIT 1;")
+#   SCOPE_DOCS=$(jq -cn --arg d "$DOC" '[$d]') NON_INTERACTIVE=1 bash src/rag_query.sh "pergunta" \
+#     | jq -r 'select(.type=="sources") | .content[].caminho' | sort -u
+#
+#   # SCOPE_DOCS malformado → cai no acervo completo, sem crash
+#   SCOPE_DOCS='invalid-json' NON_INTERACTIVE=1 bash src/rag_query.sh "pergunta"
 
 # Retorna o caminho absoluto do banco de dados SQLite
 obter_db_path() {
@@ -150,7 +163,23 @@ buscar_trechos_relevantes() {
 
     # Filtro de acervo dinâmico por metadados (número do processo) + filtro de clearance RAGSEC
     local condicoes=()
-    if [ -n "$query_original" ]; then
+
+    # Escopo explícito de documentos (sessão da GUI web, via variável de ambiente
+    # SCOPE_DOCS). Quando ativo, substitui o filtro heurístico por número de
+    # processo: a seleção manual do usuário tem precedência sobre a inferência
+    # automática (ver Review Finding #7 do plano multi_doc_scope_selector.md).
+    local scope_in=""
+    if [ -n "${SCOPE_DOCS:-}" ]; then
+        # jq escapa aspas simples (gsub) e monta a lista IN com literais SQL seguros
+        scope_in=$(echo "$SCOPE_DOCS" | jq -r "map(\"'\" + gsub(\"'\"; \"''\") + \"'\") | join(\",\")" 2>/dev/null || echo "")
+    fi
+
+    if [ -n "$scope_in" ]; then
+        condicoes+=("caminho_arquivo IN ($scope_in)")
+        local scope_count
+        scope_count=$(echo "$SCOPE_DOCS" | jq 'length' 2>/dev/null || echo "?")
+        echo -e "${YELLOW}[Escopo de Documentos Ativo: $scope_count doc(s) selecionado(s)]${NC}" >&2
+    elif [ -n "$query_original" ]; then
         # Extrai número de processo (4 dígitos + ponto opcional + 10 dígitos)
         local reg_num
         reg_num=$(echo "$query_original" | grep -oE '[0-9]{4}\.?[0-9]{10}' | head -n 1 || echo "")

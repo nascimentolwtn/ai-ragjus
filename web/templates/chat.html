@@ -12,6 +12,21 @@
 
         <button id="new-chat-btn" class="new-chat-btn" type="button">+ Nova conversa</button>
 
+        <div class="scope-selector" id="scope-selector">
+            <div class="scope-header">
+                <h3>Documentos</h3>
+                <button id="toggle-scope" class="toggle-scope-btn" type="button"
+                        title="Expandir/recolher" aria-expanded="false">&#9660;</button>
+            </div>
+            <div class="folder-tree" id="folder-tree">
+                <!-- populated by chat.js from GET /api/documents/tree -->
+            </div>
+            <div class="scope-actions">
+                <button id="select-all-docs" class="scope-action-btn" type="button">Selecionar todos</button>
+                <button id="deselect-all-docs" class="scope-action-btn" type="button">Limpar</button>
+            </div>
+        </div>
+
         <div class="session-list" id="session-list">
             {% for s in sessions %}
             <button class="session-item" data-session-id="{{ s.id }}" type="button">
@@ -33,6 +48,9 @@
     <main class="chat-pane">
         <header class="chat-header">
             <h1>Chat Jurídico RAG</h1>
+            <div class="scope-pills" id="scope-pills" title="Documentos no escopo desta conversa">
+                <!-- rendered by chat.js: "3 de 12 docs" + pills for each selected file -->
+            </div>
             <span class="status-dot" id="status-dot" title="Status"></span>
             <div class="sync-controls">
                 <span class="sync-message" id="sync-message"></span>

@@ -36,6 +36,25 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
+
+-- Selected document paths per session (absent row = all documents)
+CREATE TABLE IF NOT EXISTS session_doc_scope (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id         INTEGER NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+    selected_docs_json TEXT NOT NULL,          -- JSON array of absolute paths
+    total_available    INTEGER,                -- corpus size at selection time (UI breakdown)
+    created_at         TEXT DEFAULT (datetime('now')),
+    updated_at         TEXT DEFAULT (datetime('now'))
+);
+
+-- Optional audit trail of scope edits (useful with RAGSEC audit log)
+CREATE TABLE IF NOT EXISTS scope_changes (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    old_docs_json TEXT,
+    new_docs_json TEXT,
+    changed_at    TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -127,6 +146,61 @@ def add_message(session_id, role, content, sources=None):
 def delete_session(session_id):
     with get_conn() as conn:
         conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+
+def get_session_scope(session_id):
+    """Fetch selected docs + total_available for a session."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT selected_docs_json, total_available, updated_at "
+            "FROM session_doc_scope WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        docs = json.loads(row["selected_docs_json"])
+    except (ValueError, TypeError):
+        docs = []
+    return {
+        "selected_docs": docs,
+        "total_available": row["total_available"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def set_session_scope(session_id, selected_docs, total_available=None):
+    """Store selected docs. Empty list deletes the scope row (all documents)."""
+    with get_conn() as conn:
+        # Log the change before updating
+        old = conn.execute(
+            "SELECT selected_docs_json FROM session_doc_scope WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        conn.execute(
+            "INSERT INTO scope_changes (session_id, old_docs_json, new_docs_json) "
+            "VALUES (?, ?, ?)",
+            (session_id, old["selected_docs_json"] if old else None,
+             json.dumps(selected_docs, ensure_ascii=False)),
+        )
+
+        if not selected_docs:
+            # Empty list = delete scope row, revert to all documents
+            conn.execute(
+                "DELETE FROM session_doc_scope WHERE session_id = ?", (session_id,)
+            )
+            return
+
+        # Upsert: insert or update
+        conn.execute(
+            "INSERT INTO session_doc_scope (session_id, selected_docs_json, total_available) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET "
+            "  selected_docs_json = excluded.selected_docs_json, "
+            "  total_available    = excluded.total_available, "
+            "  updated_at         = datetime('now')",
+            (session_id, json.dumps(selected_docs, ensure_ascii=False), total_available),
+        )
 
 
 def get_setting(key, default=None):

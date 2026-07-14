@@ -13,6 +13,21 @@
 #   {"type":"token","content":"..."}      (um por token gerado pelo modelo)
 #   {"type":"error","content":"..."}
 #   {"type":"done"}
+#
+# Escopo de documentos (opcional): defina SCOPE_DOCS como um array JSON de
+# caminhos absolutos para restringir a busca/prompt a esse subconjunto do
+# acervo (ver .claude/plans/multi_doc_scope_selector.md). Teste manual:
+#
+#   # Baseline (sem escopo)
+#   NON_INTERACTIVE=1 bash src/rag_query.sh "uma pergunta qualquer" | jq '.sources | length'
+#
+#   # Escopo para um único documento
+#   DOC=$(sqlite3 .cache_vetorial/rag_store.db "SELECT DISTINCT caminho_arquivo FROM document_chunks LIMIT 1;")
+#   SCOPE_DOCS=$(jq -cn --arg d "$DOC" '[$d]') NON_INTERACTIVE=1 bash src/rag_query.sh "pergunta" \
+#     | jq -r '.sources[].caminho' | sort -u
+#
+#   # SCOPE_DOCS malformado → cai no acervo completo, sem crash
+#   SCOPE_DOCS='invalid-json' NON_INTERACTIVE=1 bash src/rag_query.sh "pergunta" | jq '.sources | length'
 set -eo pipefail
 
 # Força modo não-interativo independente do chamador (garante saída limpa em JSON)
@@ -32,6 +47,15 @@ for modulo in "${modulos[@]}"; do
 done
 
 carregar_configuracoes "$APP_DIR"
+
+# Sanitiza SCOPE_DOCS: precisa ser um array JSON de strings (caminhos absolutos).
+# Qualquer coisa diferente disso é descartada silenciosamente e o fluxo cai de
+# volta para o acervo completo (nunca deve travar a consulta).
+if [ -n "${SCOPE_DOCS:-}" ]; then
+    if ! echo "$SCOPE_DOCS" | jq -e 'type == "array" and all(type == "string")' >/dev/null 2>&1; then
+        unset SCOPE_DOCS
+    fi
+fi
 
 query="$1"
 
@@ -60,10 +84,24 @@ echo "{\"type\":\"sources\",\"content\":$fontes_json}"
 # 4. Formata contexto
 contexto=$(echo "$trechos" | jq -r '.[] | "Arquivo: " + .caminho + "\nTrecho: " + .texto + "\n---"' 2>/dev/null || echo "")
 
-# Consulta estatísticas do acervo local no SQLite para evitar alucinações da IA
+# Consulta estatísticas do acervo local no SQLite para evitar alucinações da IA.
+# Quando SCOPE_DOCS está ativo, restringe as estatísticas ao subconjunto
+# escolhido — do contrário o modelo seria informado sobre documentos que não
+# pode citar (Review Finding #8 do plano multi_doc_scope_selector.md).
 db_path=$(obter_db_path)
-total_arquivos=$(sqlite3 "$db_path" "SELECT COUNT(DISTINCT caminho_arquivo) FROM document_chunks;" 2>/dev/null || echo "0")
-arquivos_nomes=$(sqlite3 "$db_path" "SELECT DISTINCT caminho_arquivo FROM document_chunks;" 2>/dev/null | awk -F/ '{print $NF}' | sort -u | paste -sd ", " - || echo "")
+scope_in_meta=""
+if [ -n "${SCOPE_DOCS:-}" ]; then
+    scope_in_meta=$(echo "$SCOPE_DOCS" | jq -r "map(\"'\" + gsub(\"'\"; \"''\") + \"'\") | join(\",\")" 2>/dev/null || echo "")
+fi
+
+if [ -n "$scope_in_meta" ]; then
+    echo -e "${YELLOW}[Escopo: metadados do prompt restritos a $(echo "$SCOPE_DOCS" | jq 'length') doc(s)]${NC}" >&2
+    total_arquivos=$(sqlite3 "$db_path" "SELECT COUNT(DISTINCT caminho_arquivo) FROM document_chunks WHERE caminho_arquivo IN ($scope_in_meta);" 2>/dev/null || echo "0")
+    arquivos_nomes=$(sqlite3 "$db_path" "SELECT DISTINCT caminho_arquivo FROM document_chunks WHERE caminho_arquivo IN ($scope_in_meta);" 2>/dev/null | awk -F/ '{print $NF}' | sort -u | paste -sd ", " - || echo "")
+else
+    total_arquivos=$(sqlite3 "$db_path" "SELECT COUNT(DISTINCT caminho_arquivo) FROM document_chunks;" 2>/dev/null || echo "0")
+    arquivos_nomes=$(sqlite3 "$db_path" "SELECT DISTINCT caminho_arquivo FROM document_chunks;" 2>/dev/null | awk -F/ '{print $NF}' | sort -u | paste -sd ", " - || echo "")
+fi
 
 # 5. Monta o prompt RAG (idêntico ao usado pelo jus.sh)
 if [ -n "$contexto" ]; then

@@ -438,3 +438,207 @@ html, body {
         display: none;
     }
 }
+
+/* ===== Scope Selector (Sidebar) ===== */
+
+.scope-selector {
+    border-top: 1px solid var(--border);
+    margin-top: 12px;
+    padding-top: 12px;
+}
+
+.scope-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 4px;
+    margin-bottom: 8px;
+}
+
+.scope-header h3 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 0;
+    font-weight: 600;
+}
+
+.toggle-scope-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 0.7rem;
+    padding: 2px 4px;
+    transition: color 0.15s;
+}
+
+.toggle-scope-btn:hover {
+    color: var(--accent);
+}
+
+.folder-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-size: 0.75rem;
+    margin-bottom: 8px;
+}
+
+.folder-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.15s;
+    user-select: none;
+}
+
+.folder-item:hover {
+    background: var(--panel);
+}
+
+.folder-toggle {
+    width: 16px;
+    text-align: center;
+    font-size: 0.6rem;
+    color: var(--text-dim);
+    user-select: none;
+    min-width: 16px;
+}
+
+.folder-toggle.expanded::before {
+    content: "▼";
+}
+
+.folder-toggle.collapsed::before {
+    content: "▶";
+}
+
+.doc-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px 4px 24px;
+    cursor: pointer;
+    border-radius: 4px;
+    color: var(--text-dim);
+    transition: background 0.15s, color 0.15s;
+    user-select: none;
+}
+
+.doc-item:hover {
+    background: var(--panel);
+    color: var(--text);
+}
+
+.doc-item input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: var(--accent);
+    margin: 0;
+}
+
+.doc-item.selected {
+    color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.doc-item.scope-missing {
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+.doc-count {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    margin-left: auto;
+    padding: 0 4px;
+}
+
+.scope-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.scope-action-btn {
+    flex: 1;
+    font-size: 0.7rem;
+    padding: 6px 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.scope-action-btn:hover {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.scope-action-btn:active {
+    background: var(--accent);
+    color: white;
+}
+
+/* ===== Scope Pills (Chat Header) ===== */
+
+.scope-pills {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    padding: 0 10px;
+    border-left: 1px solid var(--border);
+    flex-wrap: wrap;
+}
+
+.scope-summary {
+    color: var(--accent);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.doc-pills {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+}
+
+.doc-pill {
+    background: var(--accent-dim);
+    color: var(--text);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.doc-pill.missing::after {
+    content: " !";
+    color: var(--error, #f59e0b);
+    font-weight: bold;
+}
+
+.doc-pill-remove {
+    cursor: pointer;
+    color: var(--accent);
+    font-weight: bold;
+    line-height: 1;
+    padding-left: 2px;
+}
+
+.doc-pill-remove:hover {
+    color: var(--error, #f59e0b);
+}

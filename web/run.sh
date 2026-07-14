@@ -34,5 +34,9 @@ curl -s --max-time 2 http://localhost:11434 > /dev/null 2>&1 \
     && echo "[OK] Ollama respondendo." \
     || echo "[AVISO] Não foi possível contatar o Ollama agora; o chat retornará erro até que o serviço esteja no ar."
 
-echo "Iniciando AI-RAGJus Web GUI em http://127.0.0.1:5000 (Ctrl+C para encerrar)..."
+LOCAL_IP=$(hostname -I | awk '{print $1}')
+echo "Iniciando AI-RAGJus Web GUI..."
+echo "  Acesso local: http://127.0.0.1:5000"
+echo "  Acesso na rede: http://${LOCAL_IP}:5000"
+echo "  (Ctrl+C para encerrar)"
 exec python3 "$APP_DIR/web/app.py"

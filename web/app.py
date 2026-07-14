@@ -15,6 +15,7 @@ or via the launcher:
 """
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -98,6 +99,51 @@ def api_list_sessions():
     return jsonify(db.list_sessions())
 
 
+@app.route("/api/sessions", methods=["POST"])
+def api_create_session():
+    """Create a new empty session (fixes issue #3: scope can now be set before first message)."""
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "Nova conversa").strip() or "Nova conversa"
+    session_id = db.create_session(title)
+    return jsonify({"ok": True, "session_id": session_id}), 201
+
+
+@app.route("/api/documents/tree", methods=["GET"])
+def api_documents_tree():
+    """Hierarchical folder/doc structure from the RAG vector store (read-only)."""
+    config = load_config()
+    cache_dir = Path(config["CACHE_DIR"])
+    if not cache_dir.is_absolute():
+        cache_dir = BASE_DIR / cache_dir
+    db_path = cache_dir / "rag_store.db"
+    if not db_path.exists():
+        return jsonify({"folders": {}, "total": 0})
+
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT caminho_arquivo FROM document_chunks ORDER BY caminho_arquivo"
+        ).fetchall()
+
+    pasta_alvo = Path(config["PASTA_ALVO"])
+    if not pasta_alvo.is_absolute():
+        pasta_alvo = BASE_DIR / pasta_alvo
+
+    tree = {}
+    for (filepath,) in rows:
+        p = Path(filepath)
+        try:
+            rel = p.relative_to(pasta_alvo)      # display label (relative path)
+        except ValueError:
+            rel = p                               # doc outside current PASTA_ALVO
+        folder = str(rel.parent) if str(rel.parent) != "." else "raiz"
+        tree.setdefault(folder, []).append({
+            "name": rel.name,
+            "path": filepath,                     # absolute — must match DB exactly
+        })
+
+    return jsonify({"folders": tree, "total": len(rows)})
+
+
 @app.route("/api/sessions/<int:session_id>", methods=["GET"])
 def api_session_detail(session_id):
     session = db.get_session(session_id)
@@ -110,6 +156,35 @@ def api_session_detail(session_id):
 def api_delete_session(session_id):
     db.delete_session(session_id)
     return jsonify({"ok": True})
+
+
+@app.route("/api/sessions/<int:session_id>/scope", methods=["GET"])
+def api_get_session_scope(session_id):
+    """Fetch current document scope for a session."""
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+    scope = db.get_session_scope(session_id)
+    if not scope:
+        return jsonify({"selected_docs": [], "total_available": None})
+    return jsonify(scope)
+
+
+@app.route("/api/sessions/<int:session_id>/scope", methods=["POST"])
+def api_set_session_scope(session_id):
+    """Set document scope for a session."""
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    selected_docs = payload.get("selected_docs", [])
+    if not isinstance(selected_docs, list) or \
+            not all(isinstance(d, str) for d in selected_docs):
+        return jsonify({"error": "selected_docs deve ser uma lista de caminhos."}), 400
+
+    total = payload.get("total_available")
+    db.set_session_scope(session_id, selected_docs, total)
+    return jsonify({"ok": True, "selected_docs": selected_docs,
+                    "count": len(selected_docs)})
 
 
 @app.route("/api/chat", methods=["POST"])
@@ -133,6 +208,15 @@ def api_chat():
     def generate():
         env = os.environ.copy()
         env["NON_INTERACTIVE"] = "1"
+
+        # Pass document scope (if any) to the RAG subprocess via env var.
+        scope = db.get_session_scope(session_id)
+        inline_docs = payload.get("selected_docs")          # first-message fallback
+        if inline_docs and not scope:
+            db.set_session_scope(session_id, inline_docs)
+            scope = {"selected_docs": inline_docs}
+        if scope and scope["selected_docs"]:
+            env["SCOPE_DOCS"] = json.dumps(scope["selected_docs"], ensure_ascii=False)
 
         # Let the browser know which session this turn belongs to (important
         # when the client started with no session_id and one was just created).
@@ -275,5 +359,39 @@ def api_sync():
     )
 
 
+# Manual test commands (Phase 2 — scope selector backend, no UI yet):
+#
+#   # 1. Create a session
+#   SESS=$(curl -s -X POST http://localhost:5000/api/sessions \
+#     -H "Content-Type: application/json" \
+#     -d '{"title":"Test Scope"}' | jq -r .session_id)
+#
+#   # 2. Get document tree
+#   curl -s http://localhost:5000/api/documents/tree | jq '.total'
+#
+#   # 3. Set scope to first 2 docs
+#   DOCS=$(curl -s http://localhost:5000/api/documents/tree \
+#     | jq -c '.folders | to_entries | .[0].value | .[0:2] | map(.path)')
+#   curl -s -X POST http://localhost:5000/api/sessions/$SESS/scope \
+#     -H "Content-Type: application/json" \
+#     -d "{\"selected_docs\":$DOCS}" | jq '.count'
+#
+#   # 4. Retrieve scope
+#   curl -s http://localhost:5000/api/sessions/$SESS/scope | jq '.selected_docs | length'
+#
+#   # 5. Clear scope (empty list -> reverts to all documents)
+#   curl -s -X POST http://localhost:5000/api/sessions/$SESS/scope \
+#     -H "Content-Type: application/json" \
+#     -d '{"selected_docs":[]}' | jq '.count'
+#
+#   # 6. Verify it's gone (back to all docs)
+#   curl -s http://localhost:5000/api/sessions/$SESS/scope | jq '.selected_docs'
+#
+#   # 7. Chat with scope (requires Ollama running)
+#   curl -s -X POST http://localhost:5000/api/chat \
+#     -H "Content-Type: application/json" \
+#     -d "{\"session_id\":$SESS, \"query\":\"test\", \"selected_docs\":$DOCS}" \
+#     | head -20
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True, threaded=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)

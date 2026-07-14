@@ -122,8 +122,9 @@ docker ps   # make sure docker ollama is running
 cd /path/to/ai-ragjus/web
 pip install -r requirements.txt
 ./run.sh
-# → Flask runs on http://localhost:5000
-# → Open browser: http://localhost:5000
+# → Flask binds to 0.0.0.0:5000 (accessible on all interfaces)
+# → run.sh prints the local machine IP for network access
+# → Open browser: http://127.0.0.1:5000 (localhost) or http://<LOCAL_IP>:5000 (network)
 ```
 
 **Features:**
@@ -133,6 +134,7 @@ pip install -r requirements.txt
 - Persistent chat history in separate `web/data/chat_history.db`
 - Dark/light theme (respects system preference)
 - Same RAG backend as CLI (shares vector store, models, config)
+- **Network accessible**: connect from any device on the local network using the machine's IP address
 
 **Configuration:**
 - Flask reads `config.conf` at startup (same as CLI)
@@ -143,7 +145,8 @@ pip install -r requirements.txt
 - Web app is **Phase 1** — uses CLI shell scripts as subprocesses (non-interactive mode)
 - Future Phase 2 will port hot paths to Python for better performance
 - Chat history stored separately; won't interfere with CLI usage
-- Multiple browser tabs share the same session history
+- Multiple browser tabs (local or remote) share the same session history
+- Flask listens on all interfaces (0.0.0.0) for air-gapped LAN use; production deployments should restrict to localhost or use a reverse proxy with authentication
 
 ### Configuration
 
