@@ -5,6 +5,7 @@
 .env.*.local
 
 # Docs
+/docs/tests/
 /docs/contratos/
 /docs/leis/
 /docs/processos/
