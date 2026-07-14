@@ -72,8 +72,11 @@
 3. **[2026-07-14] Flask GUI backlog: UI polish + memory features**
    Do instead: See `.claude/plans/flask_gui_design.md#backlog--future-work` and `.claude/plans/flask_gui_backlog_implementation.md`. Includes: lazy-load chat list, 3-dots menu (rename/delete chat), per-chat session memory, global cross-session memory with inspector UI.
 
-4. **[2026-07-14] Flask GUI backlog: context window monitor (qwen2.5:1.5b pressure)**
-   Do instead: See `.claude/plans/flask_gui_context_window_monitor.md`. Estimate prompt + chat history + memory context size; warn before hitting model's context ceiling. Display live % usage in chat header. Integrate with memory features to prevent truncation.
+4. **[2026-07-14] Flask GUI backlog: context window monitor (qwen2.5:coder-7b pressure)**
+   Do instead: See `.claude/plans/flask_gui_context_window_monitor.md`. Estimate per-turn prompt size; wire `num_ctx` in `ai.sh`; emit `prompt_eval_count` stats. Display live % usage in chat header. Integrate with memory features to prevent truncation.
 
-5. **[2026-07-12] Transform into Company Secret Data RAG (defense/tech products)**
+5. **[2026-07-14] Enhance .md/.txt/.json document ingestion (metadata + structure)**
+   Do instead: Currently `src/ingest.sh:31-33` uses raw `cat`. Improve: extract Markdown headings as context markers, strip YAML frontmatter into metadata, preserve code-block language tags, handle CSV as structured text (headers bold), flatten JSON objects into readable key:value text with nesting depth. Preserve semantic structure to improve RAG chunk relevance. See `src/ingest.sh` for extension point.
+
+6. **[2026-07-12] Transform into Company Secret Data RAG (defense/tech products)**
    Do instead: See detailed plan in `.claude/plans/ragsec_company_variant.md`. Key: monorepo variant (RAGSEC_MODE flag), RBAC with 4 roles + clearance levels, doc classification (public/internal/confidential/secret), DLP rule engine with regex patterns, audit logging (append-only, hash-chained, 365-day retention), alter existing schema additively (no breaking changes).
