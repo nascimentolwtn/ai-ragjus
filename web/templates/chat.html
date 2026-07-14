@@ -34,6 +34,12 @@
         <header class="chat-header">
             <h1>Chat Jurídico RAG</h1>
             <span class="status-dot" id="status-dot" title="Status"></span>
+            <div class="sync-controls">
+                <span class="sync-message" id="sync-message"></span>
+                <button id="sync-btn" class="sync-btn" type="button" title="Reindexar a pasta de documentos ({{ config.PASTA_ALVO }})">
+                    Sincronizar Documentos
+                </button>
+            </div>
         </header>
 
         <div class="messages" id="messages">

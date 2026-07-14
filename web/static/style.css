@@ -242,6 +242,58 @@ html, body {
     50% { opacity: 0.35; }
 }
 
+.sync-controls {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.sync-message {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 320px;
+}
+
+.sync-message.error {
+    color: var(--error);
+}
+
+.sync-message.success {
+    color: var(--accent);
+}
+
+.sync-btn {
+    background: transparent;
+    border: 1px solid var(--accent-dim);
+    color: var(--accent);
+    padding: 6px 14px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sync-btn:hover:not(:disabled) {
+    background: var(--accent-dim);
+    color: #fff;
+}
+
+.sync-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.sync-btn.syncing::before {
+    content: "⏳ ";
+}
+
 .messages {
     flex: 1;
     overflow-y: auto;

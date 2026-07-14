@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
@@ -28,7 +29,13 @@ import db  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAG_QUERY_SCRIPT = BASE_DIR / "src" / "rag_query.sh"
+SYNC_QUERY_SCRIPT = BASE_DIR / "src" / "sync_query.sh"
 CONFIG_PATH = BASE_DIR / "config.conf"
+
+# Guards against two /api/sync runs racing on the shared single-threaded
+# SQLite store (see "Critical Constraints" in CLAUDE.md). Sync is a rare,
+# manually-triggered action, so a simple non-blocking lock is enough.
+_sync_lock = threading.Lock()
 
 DEFAULT_CONFIG = {
     "PASTA_ALVO": "./docs",
@@ -186,6 +193,76 @@ def api_chat():
         elif not saw_error:
             # Should not normally happen; keep history consistent either way.
             db.add_message(session_id, "assistant", "", sources)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@app.route("/api/sync", methods=["POST"])
+def api_sync():
+    """Trigger a document re-sync (src/sync_query.sh -> sincronizar_documentos)
+    without stopping the web server, streaming progress back over SSE.
+
+    Reuses the same subprocess + NON_INTERACTIVE=1 + JSON-lines pattern as
+    /api/chat. Concurrent sync requests are rejected (single-threaded SQLite
+    store is shared with the CLI); the button on the client is also disabled
+    while a sync is in flight, but the lock protects against other clients
+    (other tabs, the CLI, etc.) racing it too.
+    """
+    if not _sync_lock.acquire(blocking=False):
+        return jsonify({
+            "status": "error",
+            "message": "Uma sincronização já está em andamento. Aguarde a conclusão.",
+        }), 409
+
+    def generate():
+        env = os.environ.copy()
+        env["NON_INTERACTIVE"] = "1"
+
+        try:
+            try:
+                proc = subprocess.Popen(
+                    ["bash", str(SYNC_QUERY_SCRIPT)],
+                    cwd=str(BASE_DIR),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=env,
+                    text=True,
+                    bufsize=1,
+                )
+            except OSError as exc:
+                yield _sse({"type": "error", "content": f"Falha ao iniciar sincronização: {exc}"})
+                yield _sse({"type": "done"})
+                return
+
+            try:
+                for raw_line in proc.stdout:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        # Non-JSON noise on stdout - ignore rather than break the stream.
+                        continue
+
+                    etype = event.get("type")
+                    if etype in ("progress", "error", "complete", "done"):
+                        yield _sse(event)
+            finally:
+                proc.wait()
+                stderr_output = proc.stderr.read() if proc.stderr else ""
+                if stderr_output.strip():
+                    app.logger.warning("sync_query.sh stderr: %s", stderr_output.strip())
+        finally:
+            _sync_lock.release()
 
     return Response(
         stream_with_context(generate()),

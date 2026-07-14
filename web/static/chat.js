@@ -87,6 +87,46 @@
         messagesEl.innerHTML = "";
     }
 
+    /**
+     * Reads a fetch() Response body as a stream of SSE "data: {...}\n\n"
+     * frames and invokes onEvent(parsedJson) for each one. Shared by
+     * streamChat() and syncDocuments() so both speak the same wire format.
+     */
+    async function consumeSSE(response, onEvent) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            let frameEnd;
+            while ((frameEnd = buffer.indexOf("\n\n")) !== -1) {
+                const frame = buffer.slice(0, frameEnd);
+                buffer = buffer.slice(frameEnd + 2);
+
+                const dataLines = frame
+                    .split("\n")
+                    .filter(function (l) { return l.startsWith("data:"); })
+                    .map(function (l) { return l.slice(5).trim(); });
+
+                if (!dataLines.length) continue;
+
+                let event;
+                try {
+                    event = JSON.parse(dataLines.join(""));
+                } catch (e) {
+                    continue;
+                }
+
+                onEvent(event);
+            }
+        }
+    }
+
     function markActiveSession(sessionId) {
         Array.prototype.forEach.call(sessionListEl.querySelectorAll(".session-item"), function (el) {
             el.classList.toggle("active", String(sessionId) === el.dataset.sessionId);
@@ -182,54 +222,23 @@
                 throw new Error(errBody.error || ("Erro HTTP " + response.status));
             }
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder("utf-8");
-            let buffer = "";
-
-            for (;;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-
-                // SSE frames are separated by a blank line ("\n\n")
-                let frameEnd;
-                while ((frameEnd = buffer.indexOf("\n\n")) !== -1) {
-                    const frame = buffer.slice(0, frameEnd);
-                    buffer = buffer.slice(frameEnd + 2);
-
-                    const dataLines = frame
-                        .split("\n")
-                        .filter(function (l) { return l.startsWith("data:"); })
-                        .map(function (l) { return l.slice(5).trim(); });
-
-                    if (!dataLines.length) continue;
-
-                    let event;
-                    try {
-                        event = JSON.parse(dataLines.join(""));
-                    } catch (e) {
-                        continue;
-                    }
-
-                    if (event.type === "session" && event.session_id) {
-                        currentSessionId = event.session_id;
-                    } else if (event.type === "token") {
-                        accumulated += event.content || "";
-                        assistantContentEl.textContent = accumulated;
-                        scrollToBottom();
-                    } else if (event.type === "sources") {
-                        sources = event.content || [];
-                    } else if (event.type === "error") {
-                        sawError = true;
-                        accumulated += (accumulated ? "\n" : "") + "[Erro] " + event.content;
-                        assistantContentEl.textContent = accumulated;
-                        assistantContentEl.closest(".message").classList.add("error");
-                    } else if (event.type === "done") {
-                        // no-op; loop will end when stream closes
-                    }
+            await consumeSSE(response, function (event) {
+                if (event.type === "session" && event.session_id) {
+                    currentSessionId = event.session_id;
+                } else if (event.type === "token") {
+                    accumulated += event.content || "";
+                    assistantContentEl.textContent = accumulated;
+                    scrollToBottom();
+                } else if (event.type === "sources") {
+                    sources = event.content || [];
+                } else if (event.type === "error") {
+                    sawError = true;
+                    accumulated += (accumulated ? "\n" : "") + "[Erro] " + event.content;
+                    assistantContentEl.textContent = accumulated;
+                    assistantContentEl.closest(".message").classList.add("error");
                 }
-            }
+                // "done" is a no-op; the loop ends when the stream closes.
+            });
         } catch (err) {
             sawError = true;
             accumulated += (accumulated ? "\n" : "") + "[Erro de conexão] " + err.message;
@@ -280,6 +289,71 @@
             loadSession(el.dataset.sessionId);
         });
     });
+
+    // --- Document re-sync -------------------------------------------------
+    // Runs independently of the chat flow: it does not touch `sending` /
+    // sendBtn, so questions can still be asked while a sync is in progress.
+    const syncBtn = document.getElementById("sync-btn");
+    const syncMessageEl = document.getElementById("sync-message");
+    let syncing = false;
+
+    function setSyncMessage(text, kind) {
+        syncMessageEl.textContent = text || "";
+        syncMessageEl.classList.remove("error", "success");
+        if (kind) syncMessageEl.classList.add(kind);
+    }
+
+    async function syncDocuments() {
+        if (syncing) return;
+        syncing = true;
+        syncBtn.disabled = true;
+        syncBtn.classList.add("syncing");
+        setSyncMessage("Sincronizando documentos...");
+
+        let lastProgress = "";
+        let sawError = false;
+
+        try {
+            const response = await fetch("/api/sync", { method: "POST" });
+
+            if (response.status === 409) {
+                const body = await response.json().catch(function () { return {}; });
+                setSyncMessage(body.message || "Sincronização já em andamento.", "error");
+                return;
+            }
+
+            if (!response.ok || !response.body) {
+                const body = await response.json().catch(function () { return {}; });
+                throw new Error(body.message || ("Erro HTTP " + response.status));
+            }
+
+            await consumeSSE(response, function (event) {
+                if (event.type === "progress") {
+                    lastProgress = event.content || "";
+                    setSyncMessage(lastProgress);
+                } else if (event.type === "error") {
+                    sawError = true;
+                    setSyncMessage(event.content || "Erro durante a sincronização.", "error");
+                } else if (event.type === "complete") {
+                    const chunks = typeof event.chunks_count === "number" ? event.chunks_count : "?";
+                    const files = typeof event.files_count === "number" ? event.files_count : "?";
+                    setSyncMessage(
+                        "Sincronização concluída: " + files + " arquivo(s), " + chunks + " bloco(s) indexados.",
+                        sawError ? "error" : "success"
+                    );
+                }
+                // "done" is a no-op; the loop ends when the stream closes.
+            });
+        } catch (err) {
+            setSyncMessage("Falha na sincronização: " + err.message, "error");
+        } finally {
+            syncing = false;
+            syncBtn.disabled = false;
+            syncBtn.classList.remove("syncing");
+        }
+    }
+
+    syncBtn.addEventListener("click", syncDocuments);
 
     setStatus("idle");
 })();
