@@ -38,6 +38,7 @@
             <div class="config-line"><span>Embedding:</span> <strong>{{ config.MODELO_EMBEDDING }}</strong></div>
             <div class="config-line"><span>Temperatura:</span> <strong>{{ config.TEMPERATURA }}</strong></div>
             <div class="config-line"><span>Acervo:</span> <strong title="{{ config.PASTA_ALVO }}">{{ config.PASTA_ALVO }}</strong></div>
+            <a href="{{ url_for('settings_page') }}" class="settings-link" title="Configurações e memória global">&#9881; Configurações</a>
         </div>
     </aside>
 
@@ -48,6 +49,12 @@
                 <!-- rendered by chat.js: "3 de 12 docs" + pills for each selected file -->
             </div>
             <span class="status-dot" id="status-dot" title="Status"></span>
+            <div class="memory-disclosure" id="memory-disclosure">
+                <button type="button" id="memory-disclosure-btn" class="memory-disclosure-btn" title="Memória desta conversa">
+                    🧠 Memória
+                </button>
+                <div class="memory-disclosure-panel" id="memory-disclosure-panel" hidden></div>
+            </div>
             <div class="sync-controls">
                 <span class="sync-message" id="sync-message"></span>
                 <button id="sync-btn" class="sync-btn" type="button" title="Reindexar a pasta de documentos ({{ config.PASTA_ALVO }})">

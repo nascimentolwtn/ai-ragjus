@@ -55,6 +55,27 @@ CREATE TABLE IF NOT EXISTS scope_changes (
     new_docs_json TEXT,
     changed_at    TEXT DEFAULT (datetime('now'))
 );
+
+-- Per-chat memory: short facts extracted from a session's own turns,
+-- injected back into future prompts in that same session (RAG_MEMORY_CONTEXT).
+CREATE TABLE IF NOT EXISTS session_memory (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    content     TEXT NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_session_memory_session ON session_memory(session_id);
+
+-- Global cross-session memory: user-entered or auto-extracted long-term facts.
+CREATE TABLE IF NOT EXISTS global_memory (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    key         TEXT NOT NULL UNIQUE,
+    value       TEXT NOT NULL,
+    source      TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','auto')),
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT DEFAULT (datetime('now')),
+    updated_at  TEXT DEFAULT (datetime('now'))
+);
 """
 
 
@@ -225,4 +246,135 @@ def set_setting(key, value):
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
+        )
+
+
+# --- Per-chat memory (M3) --------------------------------------------------
+
+def add_session_memory(session_id, content):
+    content = (content or "").strip()
+    if not content:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO session_memory (session_id, content) VALUES (?, ?)",
+            (session_id, content),
+        )
+
+
+def get_session_memory(session_id, limit=10):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, content, created_at FROM session_memory "
+            "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+    # Return oldest-first so the injected block reads chronologically.
+    return [dict(row) for row in reversed(rows)]
+
+
+def prune_session_memory(session_id, keep=10):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM session_memory WHERE session_id = ? AND id NOT IN ("
+            "  SELECT id FROM session_memory WHERE session_id = ? "
+            "  ORDER BY id DESC LIMIT ?"
+            ")",
+            (session_id, session_id, keep),
+        )
+
+
+def delete_session_memory_item(session_id, memory_id):
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM session_memory WHERE session_id = ? AND id = ?",
+            (session_id, memory_id),
+        )
+
+
+# --- Global cross-session memory (M4) --------------------------------------
+
+def list_global_memory():
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, key, value, source, enabled, created_at, updated_at "
+            "FROM global_memory ORDER BY updated_at DESC"
+        ).fetchall()
+    entries = [dict(row) for row in rows]
+    return {
+        "enabled": [e for e in entries if e["enabled"]],
+        "disabled": [e for e in entries if not e["enabled"]],
+    }
+
+
+def upsert_global_memory(key, value, source="manual"):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO global_memory (key, value, source) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "  value = excluded.value, updated_at = datetime('now')",
+            (key, value, source),
+        )
+        row = conn.execute(
+            "SELECT id, key, value, source, enabled, created_at, updated_at "
+            "FROM global_memory WHERE key = ?", (key,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_global_memory(memory_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, key, value, source, enabled, created_at, updated_at "
+            "FROM global_memory WHERE id = ?", (memory_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_global_memory(memory_id, key=None, value=None):
+    fields, params = [], []
+    if key is not None:
+        fields.append("key = ?")
+        params.append(key)
+    if value is not None:
+        fields.append("value = ?")
+        params.append(value)
+    if not fields:
+        return
+    fields.append("updated_at = datetime('now')")
+    params.append(memory_id)
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE global_memory SET {', '.join(fields)} WHERE id = ?", params
+        )
+
+
+def set_global_memory_enabled(memory_id, enabled):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE global_memory SET enabled = ?, updated_at = datetime('now') WHERE id = ?",
+            (1 if enabled else 0, memory_id),
+        )
+
+
+def delete_global_memory(memory_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM global_memory WHERE id = ?", (memory_id,))
+
+
+def count_auto_global_memory():
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM global_memory WHERE source = 'auto'"
+        ).fetchone()
+    return row["c"] if row else 0
+
+
+def evict_oldest_auto_global_memory():
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM global_memory WHERE id = ("
+            "  SELECT id FROM global_memory WHERE source = 'auto' "
+            "  ORDER BY created_at ASC LIMIT 1"
+            ")"
         )

@@ -23,10 +23,11 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
-# Make `import db` work regardless of how this module is invoked
-# (python web/app.py, flask --app web/app run, gunicorn web.app:app, ...).
+# Make `import db`/`import memory` work regardless of how this module is
+# invoked (python web/app.py, flask --app web/app run, gunicorn web.app:app, ...).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import db  # noqa: E402
+import memory  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAG_QUERY_SCRIPT = BASE_DIR / "src" / "rag_query.sh"
@@ -48,6 +49,9 @@ DEFAULT_CONFIG = {
     "CHUNK_SIZE": "1000",
     "CHUNK_OVERLAP": "200",
     "TEMPERATURA": "0",
+    "AUTO_MEMORY": "1",
+    "CONTEXT_WINDOW": "16384",
+    "TOKEN_RATIO": "0.30",
 }
 
 app = Flask(__name__)
@@ -214,6 +218,22 @@ def api_set_session_scope(session_id):
                     "count": len(selected_docs)})
 
 
+@app.route("/api/sessions/<int:session_id>/memory", methods=["GET"])
+def api_get_session_memory(session_id):
+    """M3 mini-UI: list facts remembered for this session."""
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+    return jsonify({"facts": db.get_session_memory(session_id, limit=10)})
+
+
+@app.route("/api/sessions/<int:session_id>/memory/<int:memory_id>", methods=["DELETE"])
+def api_delete_session_memory(session_id, memory_id):
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+    db.delete_session_memory_item(session_id, memory_id)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     payload = request.get_json(silent=True) or {}
@@ -232,6 +252,8 @@ def api_chat():
 
     db.add_message(session_id, "user", query)
 
+    config = load_config()
+
     def generate():
         env = os.environ.copy()
         env["NON_INTERACTIVE"] = "1"
@@ -244,6 +266,11 @@ def api_chat():
             scope = {"selected_docs": inline_docs}
         if scope and scope["selected_docs"]:
             env["SCOPE_DOCS"] = json.dumps(scope["selected_docs"], ensure_ascii=False)
+
+        # M0/M3/M4: inject accumulated session + global memory facts, if any.
+        memory_context = memory.build_memory_context(session_id)
+        if memory_context:
+            env["RAG_MEMORY_CONTEXT"] = memory_context
 
         # Let the browser know which session this turn belongs to (important
         # when the client started with no session_id and one was just created).
@@ -304,6 +331,16 @@ def api_chat():
         elif not saw_error:
             # Should not normally happen; keep history consistent either way.
             db.add_message(session_id, "assistant", "", sources)
+
+        # M3/M4: extract memory facts off-thread so it never delays the SSE
+        # "done" event. Best-effort (memory.record_turn_memory swallows its
+        # own errors); skipped entirely if the turn produced no real answer.
+        if full_answer and config.get("AUTO_MEMORY", "1") != "0":
+            threading.Thread(
+                target=memory.record_turn_memory,
+                args=(session_id, query, full_answer, config),
+                daemon=True,
+            ).start()
 
     return Response(
         stream_with_context(generate()),
@@ -384,6 +421,64 @@ def api_sync():
             "Connection": "keep-alive",
         },
     )
+
+
+@app.route("/settings")
+def settings_page():
+    """M4: read-only config.conf reference + global memory inspector."""
+    config = load_config()
+    return render_template("settings.html", config=config, memory=db.list_global_memory())
+
+
+@app.route("/api/memory/global", methods=["GET"])
+def api_list_global_memory():
+    return jsonify(db.list_global_memory())
+
+
+@app.route("/api/memory/global", methods=["POST"])
+def api_create_global_memory():
+    payload = request.get_json(silent=True) or {}
+    key = (payload.get("key") or "").strip()
+    value = (payload.get("value") or "").strip()
+    if not key or len(key) > 60:
+        return jsonify({"error": "Chave inválida (obrigatória, até 60 caracteres)."}), 400
+    if not value or len(value) > 500:
+        return jsonify({"error": "Valor inválido (obrigatório, até 500 caracteres)."}), 400
+    entry = db.upsert_global_memory(key, value, source="manual")
+    return jsonify({"ok": True, "entry": entry}), 201
+
+
+@app.route("/api/memory/global/<int:memory_id>", methods=["PATCH"])
+def api_update_global_memory(memory_id):
+    if not db.get_global_memory(memory_id):
+        return jsonify({"error": "Entrada não encontrada."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    if "enabled" in payload:
+        db.set_global_memory_enabled(memory_id, bool(payload["enabled"]))
+
+    key = payload.get("key")
+    value = payload.get("value")
+    if key is not None:
+        key = key.strip()
+        if not key or len(key) > 60:
+            return jsonify({"error": "Chave inválida."}), 400
+    if value is not None:
+        value = value.strip()
+        if not value or len(value) > 500:
+            return jsonify({"error": "Valor inválido."}), 400
+    if key is not None or value is not None:
+        db.update_global_memory(memory_id, key=key, value=value)
+
+    return jsonify({"ok": True, "entry": db.get_global_memory(memory_id)})
+
+
+@app.route("/api/memory/global/<int:memory_id>", methods=["DELETE"])
+def api_delete_global_memory(memory_id):
+    if not db.get_global_memory(memory_id):
+        return jsonify({"error": "Entrada não encontrada."}), 404
+    db.delete_global_memory(memory_id)
+    return jsonify({"ok": True})
 
 
 # Manual test commands (Phase 2 — scope selector backend, no UI yet):

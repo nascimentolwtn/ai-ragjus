@@ -1012,6 +1012,75 @@
         });
     }
 
+    // --- Session memory disclosure (M3 mini-UI) -----------------------------
+    const memoryBtn = document.getElementById("memory-disclosure-btn");
+    const memoryPanel = document.getElementById("memory-disclosure-panel");
+
+    function renderMemoryFacts(facts) {
+        memoryPanel.innerHTML = "";
+        if (!facts.length) {
+            const empty = document.createElement("div");
+            empty.className = "memory-empty";
+            empty.textContent = "Nenhum fato memorizado nesta conversa ainda.";
+            memoryPanel.appendChild(empty);
+            return;
+        }
+        facts.forEach(function (fact) {
+            const row = document.createElement("div");
+            row.className = "memory-fact";
+
+            const text = document.createElement("span");
+            text.textContent = fact.content;
+
+            const remove = document.createElement("span");
+            remove.className = "memory-fact-remove";
+            remove.textContent = "×";
+            remove.title = "Esquecer este fato";
+            remove.addEventListener("click", function () {
+                fetch("/api/sessions/" + currentSessionId + "/memory/" + fact.id, { method: "DELETE" })
+                    .then(function () { row.remove(); })
+                    .catch(function (err) { console.error(err); });
+            });
+
+            row.appendChild(text);
+            row.appendChild(remove);
+            memoryPanel.appendChild(row);
+        });
+    }
+
+    if (memoryBtn) {
+        memoryBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            const isOpen = !memoryPanel.hasAttribute("hidden");
+            if (isOpen) {
+                memoryPanel.setAttribute("hidden", "");
+                return;
+            }
+            if (!currentSessionId) {
+                renderMemoryFacts([]);
+                memoryPanel.removeAttribute("hidden");
+                return;
+            }
+            fetch("/api/sessions/" + currentSessionId + "/memory")
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    renderMemoryFacts(data.facts || []);
+                    memoryPanel.removeAttribute("hidden");
+                })
+                .catch(function () {
+                    renderMemoryFacts([]);
+                    memoryPanel.removeAttribute("hidden");
+                });
+        });
+
+        document.addEventListener("click", function (ev) {
+            if (!memoryPanel.hasAttribute("hidden") &&
+                !memoryPanel.contains(ev.target) && ev.target !== memoryBtn) {
+                memoryPanel.setAttribute("hidden", "");
+            }
+        });
+    }
+
     loadDocumentTree();
     loadSessionsPage(true);
 

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}AI-RAGJus — Configurações{% endblock %}
+
+{% block body %}
+<div class="app-shell settings-shell">
+    <main class="settings-pane">
+        <header class="chat-header">
+            <h1>Configurações</h1>
+            <a href="{{ url_for('index') }}" class="back-link">&larr; Voltar ao chat</a>
+        </header>
+
+        <section class="settings-section">
+            <h2>Configuração Atual (somente leitura)</h2>
+            <p class="settings-hint">
+                Valores lidos de <code>config.conf</code>. Para alterar, edite o arquivo e
+                reinicie o Flask (ver CLAUDE.md).
+            </p>
+            <table class="settings-table config-readonly">
+                <tbody>
+                    <tr><td>Modelo de Inferência</td><td>{{ config.MODELO_IA }}</td></tr>
+                    <tr><td>Modelo de Embedding</td><td>{{ config.MODELO_EMBEDDING }}</td></tr>
+                    <tr><td>Temperatura</td><td>{{ config.TEMPERATURA }}</td></tr>
+                    <tr><td>Chunk Size</td><td>{{ config.CHUNK_SIZE }}</td></tr>
+                    <tr><td>Chunk Overlap</td><td>{{ config.CHUNK_OVERLAP }}</td></tr>
+                    <tr><td>Pasta de Documentos</td><td>{{ config.PASTA_ALVO }}</td></tr>
+                    <tr><td>Janela de Contexto (num_ctx)</td><td>{{ config.CONTEXT_WINDOW }}</td></tr>
+                    <tr><td>Memória Automática (global)</td><td>{{ "ativada" if config.AUTO_MEMORY != "0" else "desativada" }}</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section class="settings-section">
+            <h2>Memória Global</h2>
+            <p class="settings-hint">
+                Fatos persistentes sobre você/seu domínio, injetados em toda conversa
+                (respeitando o limite de contexto). Fatos com origem "auto" foram
+                extraídos automaticamente das suas conversas; "manual" foram
+                cadastrados aqui.
+            </p>
+
+            <form id="memory-add-form" class="memory-add-form">
+                <input type="text" id="memory-key-input" placeholder="Chave (ex: area_atuacao)" maxlength="60" required>
+                <textarea id="memory-value-input" placeholder="Valor (ex: direito trabalhista)" maxlength="500" required></textarea>
+                <button type="submit">Adicionar</button>
+            </form>
+
+            <table class="settings-table memory-table" id="memory-table">
+                <thead>
+                    <tr>
+                        <th>Chave</th>
+                        <th>Valor</th>
+                        <th>Origem</th>
+                        <th>Ativo</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="memory-table-body">
+                    <!-- populated by settings.js -->
+                </tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<script src="{{ url_for('static', filename='settings.js') }}"></script>
+{% endblock %}

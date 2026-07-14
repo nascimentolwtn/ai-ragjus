@@ -910,3 +910,256 @@ html, body {
 .doc-pill-remove:hover {
     color: var(--error, #f59e0b);
 }
+
+/* ===== Settings link (sidebar footer) ===== */
+
+.settings-link {
+    display: block;
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 6px 4px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.settings-link:hover {
+    background: var(--panel);
+    color: var(--accent);
+}
+
+/* ===== Settings Page (M4) ===== */
+
+.settings-shell {
+    display: block;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.settings-pane {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 20px 40px 20px;
+}
+
+.settings-pane .chat-header {
+    padding: 20px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+}
+
+.back-link {
+    margin-left: auto;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.85rem;
+}
+
+.back-link:hover {
+    text-decoration: underline;
+}
+
+.settings-section {
+    margin-bottom: 32px;
+}
+
+.settings-section h2 {
+    font-size: 1rem;
+    color: var(--text);
+    margin-bottom: 6px;
+}
+
+.settings-hint {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 14px;
+}
+
+.settings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.settings-table th,
+.settings-table td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+}
+
+.settings-table th {
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+}
+
+.config-readonly td:first-child {
+    color: var(--text-dim);
+    width: 40%;
+}
+
+.memory-add-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    align-items: flex-start;
+}
+
+.memory-add-form input,
+.memory-add-form textarea {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 0.85rem;
+}
+
+.memory-add-form input {
+    flex: 0 0 200px;
+}
+
+.memory-add-form textarea {
+    flex: 1;
+    min-height: 38px;
+    resize: vertical;
+}
+
+.memory-add-form button {
+    background: var(--accent-dim);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85rem;
+}
+
+.memory-add-form button:hover {
+    background: var(--accent);
+}
+
+.source-badge {
+    font-size: 0.68rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.source-badge.source-manual {
+    background: var(--accent-dim);
+    color: #fff;
+}
+
+.source-badge.source-auto {
+    background: var(--bg-alt);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+}
+
+.table-action-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    margin-right: 4px;
+    font-family: inherit;
+}
+
+.table-action-btn:hover {
+    background: var(--accent-dim);
+    color: #fff;
+}
+
+.table-action-btn.danger:hover {
+    background: var(--error);
+    border-color: var(--error);
+}
+
+.inline-edit {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--accent-dim);
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 4px 6px;
+}
+
+/* ===== Session memory disclosure (M3 mini-UI, chat header) ===== */
+
+.memory-disclosure {
+    position: relative;
+}
+
+.memory-disclosure-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: var(--radius);
+    padding: 4px 10px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.memory-disclosure-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+}
+
+.memory-disclosure-panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 6px;
+    width: 280px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    padding: 10px;
+    z-index: 30;
+    font-size: 0.78rem;
+}
+
+.memory-disclosure-panel .memory-fact {
+    display: flex;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+}
+
+.memory-disclosure-panel .memory-fact:last-child {
+    border-bottom: none;
+}
+
+.memory-disclosure-panel .memory-fact-remove {
+    cursor: pointer;
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+
+.memory-disclosure-panel .memory-fact-remove:hover {
+    color: var(--error);
+}
+
+.memory-disclosure-panel .memory-empty {
+    color: var(--text-dim);
+    font-style: italic;
+}
