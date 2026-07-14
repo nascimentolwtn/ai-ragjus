@@ -78,5 +78,8 @@
 5. **[2026-07-14] Enhance .md/.txt/.json document ingestion (metadata + structure)**
    Do instead: Currently `src/ingest.sh:31-33` uses raw `cat`. Improve: extract Markdown headings as context markers, strip YAML frontmatter into metadata, preserve code-block language tags, handle CSV as structured text (headers bold), flatten JSON objects into readable key:value text with nesting depth. Preserve semantic structure to improve RAG chunk relevance. See `src/ingest.sh` for extension point.
 
-6. **[2026-07-12] Transform into Company Secret Data RAG (defense/tech products)**
+6. **[2026-07-14] Multi-doc scope selector (NotebookLM-style document focus)**
+   Do instead: Backend already scans subfolders recursively + stores full paths in DB. Add Flask UI: sidebar folder tree (expandable, checkboxes), select multiple docs to create a scoped chat session. Each session pins selected docs; RAG search only retrieves from those docs. Show selected docs as pills in chat header with breakdown. Enables user to focus analysis on a subset (e.g., contract + amendments) without full corpus noise.
+
+7. **[2026-07-12] Transform into Company Secret Data RAG (defense/tech products)**
    Do instead: See detailed plan in `.claude/plans/ragsec_company_variant.md`. Key: monorepo variant (RAGSEC_MODE flag), RBAC with 4 roles + clearance levels, doc classification (public/internal/confidential/secret), DLP rule engine with regex patterns, audit logging (append-only, hash-chained, 365-day retention), alter existing schema additively (no breaking changes).
