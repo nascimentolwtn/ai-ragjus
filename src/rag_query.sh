@@ -103,13 +103,22 @@ else
     arquivos_nomes=$(sqlite3 "$db_path" "SELECT DISTINCT caminho_arquivo FROM document_chunks;" 2>/dev/null | awk -F/ '{print $NF}' | sort -u | paste -sd ", " - || echo "")
 fi
 
-# 5. Monta o prompt RAG (idêntico ao usado pelo jus.sh)
+# 5. Monta o prompt RAG (idêntico ao usado pelo jus.sh, + bloco opcional de
+#    memória via RAG_MEMORY_CONTEXT - ver .claude/plans/flask_gui_backlog_implementation.md M0)
+memoria_bloco=""
+if [ -n "${RAG_MEMORY_CONTEXT:-}" ]; then
+    memoria_bloco="
+
+Contexto de Memória (fatos conhecidos desta conversa e do usuário):
+$RAG_MEMORY_CONTEXT"
+fi
+
 if [ -n "$contexto" ]; then
     prompt="Você é um assistente jurídico especialista de elite. Baseado nos trechos de documentos fornecidos abaixo e nos metadados reais do acervo local, responda de forma clara e objetiva à pergunta do usuário.
 
 Metadados do Acervo Local:
 - Total de arquivos jurídicos indexados: $total_arquivos
-- Nomes dos arquivos no acervo: $arquivos_nomes
+- Nomes dos arquivos no acervo: $arquivos_nomes$memoria_bloco
 
 Documentos Jurídicos de Contexto:
 $contexto
@@ -117,7 +126,7 @@ $contexto
 Pergunta do Usuário:
 $query"
 else
-    prompt="Você é um assistente jurídico de elite. Diga de forma amigável e profissional que seu acervo local de documentos jurídicos está vazio ou não possui informações correlacionadas à pergunta, e oriente o usuário a colocar documentos na pasta de destino correspondente e reindexar.
+    prompt="Você é um assistente jurídico de elite. Diga de forma amigável e profissional que seu acervo local de documentos jurídicos está vazio ou não possui informações correlacionadas à pergunta, e oriente o usuário a colocar documentos na pasta de destino correspondente e reindexar.$memoria_bloco
 
 Pergunta do Usuário:
 $query"
