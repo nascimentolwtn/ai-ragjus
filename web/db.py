@@ -64,6 +64,7 @@ def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     try:
         yield conn
         conn.commit()
@@ -91,12 +92,21 @@ def update_session_title(session_id, title):
         )
 
 
-def list_sessions():
+def list_sessions(limit=30, offset=0):
+    """Paginated session list, newest-updated first.
+
+    Fetches `limit + 1` rows to derive `has_more` without a separate
+    COUNT(*) query.
+    """
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+            "SELECT id, title, created_at, updated_at FROM sessions "
+            "ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            (limit + 1, offset),
         ).fetchall()
-        return [dict(row) for row in rows]
+    has_more = len(rows) > limit
+    sessions = [dict(row) for row in rows[:limit]]
+    return {"sessions": sessions, "has_more": has_more}
 
 
 def get_session(session_id):

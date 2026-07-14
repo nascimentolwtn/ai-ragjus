@@ -311,36 +311,270 @@
         }
     }
 
+    const SESSIONS_PAGE_SIZE = 30;
+    let sessionsOffset = 0;
+    let sessionsHasMore = true;
+    let sessionsLoading = false;
+    let sessionsObserver = null;
+
     function markActiveSession(sessionId) {
         Array.prototype.forEach.call(sessionListEl.querySelectorAll(".session-item"), function (el) {
             el.classList.toggle("active", String(sessionId) === el.dataset.sessionId);
         });
     }
 
-    function refreshSessionList() {
-        fetch("/api/sessions")
+    function buildSessionItem(s) {
+        const item = document.createElement("div");
+        item.className = "session-item";
+        item.dataset.sessionId = s.id;
+
+        const title = document.createElement("span");
+        title.className = "session-title";
+        title.textContent = s.title || "Nova conversa";
+        title.addEventListener("click", function () { loadSession(s.id); });
+
+        const menuBtn = document.createElement("button");
+        menuBtn.type = "button";
+        menuBtn.className = "session-menu-btn";
+        menuBtn.textContent = "⋮"; // vertical ellipsis
+        menuBtn.title = "Opções da conversa";
+        menuBtn.setAttribute("aria-label", "Opções da conversa");
+        menuBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            openSessionMenu(item, s);
+        });
+
+        item.appendChild(title);
+        item.appendChild(menuBtn);
+        return item;
+    }
+
+    function appendSessionSentinel() {
+        removeSessionSentinel();
+        const sentinel = document.createElement("div");
+        sentinel.id = "session-sentinel";
+        sentinel.className = "session-sentinel";
+        sessionListEl.appendChild(sentinel);
+
+        if (!sessionsObserver) {
+            sessionsObserver = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) loadSessionsPage(false);
+                });
+            }, { root: sessionListEl });
+        }
+        sessionsObserver.observe(sentinel);
+    }
+
+    function removeSessionSentinel() {
+        const existing = document.getElementById("session-sentinel");
+        if (existing) {
+            if (sessionsObserver) sessionsObserver.unobserve(existing);
+            existing.remove();
+        }
+    }
+
+    function loadSessionsPage(reset) {
+        if (sessionsLoading) return;
+        if (reset) {
+            sessionsOffset = 0;
+            sessionsHasMore = true;
+        }
+        if (!sessionsHasMore) return;
+
+        sessionsLoading = true;
+        fetch("/api/sessions?limit=" + SESSIONS_PAGE_SIZE + "&offset=" + sessionsOffset)
             .then(function (r) { return r.json(); })
-            .then(function (sessions) {
-                sessionListEl.innerHTML = "";
-                if (!sessions.length) {
+            .then(function (data) {
+                const sessions = data.sessions || [];
+                sessionsHasMore = !!data.has_more;
+
+                if (reset) sessionListEl.innerHTML = "";
+                removeSessionSentinel();
+
+                if (reset && !sessions.length) {
                     const p = document.createElement("p");
                     p.className = "session-empty";
                     p.textContent = "Nenhuma conversa ainda.";
                     sessionListEl.appendChild(p);
+                    sessionsLoading = false;
                     return;
                 }
+
                 sessions.forEach(function (s) {
-                    const btn = document.createElement("button");
-                    btn.type = "button";
-                    btn.className = "session-item";
-                    btn.dataset.sessionId = s.id;
-                    btn.textContent = s.title || "Nova conversa";
-                    btn.addEventListener("click", function () { loadSession(s.id); });
-                    sessionListEl.appendChild(btn);
+                    sessionListEl.appendChild(buildSessionItem(s));
                 });
+                sessionsOffset += sessions.length;
+
+                if (sessionsHasMore) appendSessionSentinel();
                 markActiveSession(currentSessionId);
+                sessionsLoading = false;
             })
-            .catch(function () { /* sidebar refresh is best-effort */ });
+            .catch(function () {
+                sessionsLoading = false; /* sidebar refresh is best-effort */
+            });
+    }
+
+    function refreshSessionList() {
+        loadSessionsPage(true);
+    }
+
+    // --- Session context menu (3-dots: rename / delete) --------------------
+    let openMenuEl = null;
+
+    function closeSessionMenu() {
+        if (openMenuEl) {
+            openMenuEl.remove();
+            openMenuEl = null;
+        }
+        document.removeEventListener("click", handleOutsideMenuClick);
+        document.removeEventListener("keydown", handleMenuEscape);
+    }
+
+    function handleOutsideMenuClick(ev) {
+        if (openMenuEl && !openMenuEl.contains(ev.target)) closeSessionMenu();
+    }
+
+    function handleMenuEscape(ev) {
+        if (ev.key === "Escape") closeSessionMenu();
+    }
+
+    function startRename(item, session) {
+        closeSessionMenu();
+        const titleEl = item.querySelector(".session-title");
+        const original = titleEl.textContent;
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "session-title-input";
+        input.value = original;
+        input.maxLength = 120;
+
+        titleEl.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let committed = false;
+
+        function commit() {
+            if (committed) return;
+            committed = true;
+            const newTitle = input.value.trim();
+            if (!newTitle || newTitle === original) {
+                input.replaceWith(titleEl);
+                return;
+            }
+            fetch("/api/sessions/" + session.id, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: newTitle }),
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    titleEl.textContent = data.title || newTitle;
+                    input.replaceWith(titleEl);
+                })
+                .catch(function () {
+                    titleEl.textContent = original;
+                    input.replaceWith(titleEl);
+                });
+        }
+
+        function cancel() {
+            if (committed) return;
+            committed = true;
+            input.replaceWith(titleEl);
+        }
+
+        input.addEventListener("blur", commit);
+        input.addEventListener("keydown", function (ev) {
+            if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+            else if (ev.key === "Escape") { ev.preventDefault(); cancel(); }
+        });
+    }
+
+    function confirmDelete(item, session) {
+        closeSessionMenu();
+
+        const confirmBar = document.createElement("div");
+        confirmBar.className = "session-confirm-delete";
+
+        const label = document.createElement("span");
+        label.textContent = "Excluir?";
+
+        const yesBtn = document.createElement("button");
+        yesBtn.type = "button";
+        yesBtn.textContent = "Sim";
+        yesBtn.className = "confirm-yes";
+
+        const noBtn = document.createElement("button");
+        noBtn.type = "button";
+        noBtn.textContent = "Cancelar";
+        noBtn.className = "confirm-no";
+
+        confirmBar.appendChild(label);
+        confirmBar.appendChild(yesBtn);
+        confirmBar.appendChild(noBtn);
+
+        item.appendChild(confirmBar);
+
+        noBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            confirmBar.remove();
+        });
+
+        yesBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            fetch("/api/sessions/" + session.id, { method: "DELETE" })
+                .then(function () {
+                    item.remove();
+                    if (String(currentSessionId) === String(session.id)) {
+                        currentSessionId = null;
+                        clearMessages();
+                        addMessage("assistant",
+                            "Nova conversa iniciada. Faça uma pergunta sobre o seu acervo de documentos.");
+                        markActiveSession(null);
+                    }
+                })
+                .catch(function (err) {
+                    confirmBar.remove();
+                    console.error("Falha ao excluir conversa:", err);
+                });
+        });
+    }
+
+    function openSessionMenu(item, session) {
+        closeSessionMenu();
+
+        const menu = document.createElement("div");
+        menu.className = "session-menu";
+
+        const renameBtn = document.createElement("button");
+        renameBtn.type = "button";
+        renameBtn.textContent = "Renomear";
+        renameBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            startRename(item, session);
+        });
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.textContent = "Excluir";
+        deleteBtn.className = "danger";
+        deleteBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            confirmDelete(item, session);
+        });
+
+        menu.appendChild(renameBtn);
+        menu.appendChild(deleteBtn);
+        item.appendChild(menu);
+        openMenuEl = menu;
+
+        setTimeout(function () {
+            document.addEventListener("click", handleOutsideMenuClick);
+            document.addEventListener("keydown", handleMenuEscape);
+        }, 0);
     }
 
     function loadSession(sessionId) {
@@ -482,13 +716,6 @@
         inputEl.style.height = "auto";
 
         streamChat(query);
-    });
-
-    // Wire up server-rendered session items on first load
-    Array.prototype.forEach.call(document.querySelectorAll(".session-item"), function (el) {
-        el.addEventListener("click", function () {
-            loadSession(el.dataset.sessionId);
-        });
     });
 
     // --- Document re-sync -------------------------------------------------
@@ -786,6 +1013,7 @@
     }
 
     loadDocumentTree();
+    loadSessionsPage(true);
 
     setStatus("idle");
 })();

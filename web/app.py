@@ -90,13 +90,22 @@ def _sse(payload):
 @app.route("/")
 def index():
     config = load_config()
-    sessions = db.list_sessions()
-    return render_template("chat.html", config=config, sessions=sessions)
+    return render_template("chat.html", config=config)
 
 
 @app.route("/api/sessions", methods=["GET"])
 def api_list_sessions():
-    return jsonify(db.list_sessions())
+    try:
+        limit = int(request.args.get("limit", 30))
+    except (TypeError, ValueError):
+        limit = 30
+    try:
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        offset = 0
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+    return jsonify(db.list_sessions(limit=limit, offset=offset))
 
 
 @app.route("/api/sessions", methods=["POST"])
@@ -152,8 +161,26 @@ def api_session_detail(session_id):
     return jsonify({"session": session, "messages": db.get_messages(session_id)})
 
 
+@app.route("/api/sessions/<int:session_id>", methods=["PATCH"])
+def api_rename_session(session_id):
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    title = (payload.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "Título não pode ser vazio."}), 400
+    if len(title) > 120:
+        title = title[:120]
+
+    db.update_session_title(session_id, title)
+    return jsonify({"ok": True, "title": title})
+
+
 @app.route("/api/sessions/<int:session_id>", methods=["DELETE"])
 def api_delete_session(session_id):
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
     db.delete_session(session_id)
     return jsonify({"ok": True})
 
