@@ -117,3 +117,23 @@ Production: **Gunicorn** with `gevent`/`sync` workers behind the local host — 
 5. Settings/prompt editor + document sync UI.
 6. Tests, then Gunicorn/systemd packaging.
 7. Phase 2: port cosine search + Ollama client to Python for latency.
+
+## Backlog / Future Work
+
+### UI/UX Improvements
+
+- **Lazy-load chat list** — Fetch session list asynchronously on page load; currently blocks sidebar rendering. Consider pagination or virtual scrolling for large session counts. Add a small loading spinner while fetching.
+
+- **Chat context menu (3-dots)** — Per-session actions in the sidebar:
+  - **Rename chat** — Inline edit or modal to change session title (currently auto-derived from first message).
+  - **Delete chat** — With confirmation dialog; cascade-delete messages from `messages` table.
+
+### Memory & Context Management
+
+- **Per-chat memory (session context)** — Store system-generated summaries or extracted facts from each chat session. Use these as additional RAG context in future queries within the same session, improving follow-up question accuracy without bloating the prompt template. Store in a new `memory` column in the `sessions` table or a separate `session_memory` table.
+
+- **Global memory** — Persistent cross-session learning (similar to ChatGPT's "custom instructions" or Claude's memory feature). Store user preferences, facts about the user's domain, and accumulated insights accessible via UI:
+  - `global_memory` table in `chat_history.db` with `key TEXT, value TEXT, created_at, updated_at`.
+  - Settings page with a "Global Memory Inspector" that lists stored facts and allows CRUD operations.
+  - Optionally summarize queries/answers to auto-populate facts (e.g., "User frequently asks about labor law" → auto-tag queries for memory filtering).
+  - Pass selected global memory to the RAG prompt template per query to inject relevant context without cluttering the system prompt.

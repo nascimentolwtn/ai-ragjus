@@ -69,5 +69,11 @@
 2. **[2026-07-12] Build Flask web GUI (ChatGPT-like UI + chat history)**
    Do instead: See detailed plan in `.claude/plans/flask_gui_design.md`. Key: bridge src/*.sh modules as subprocesses (Phase 1), reuse existing `gerar_embedding`/`perguntar_ollama`/`buscar_trechos_relevantes`, add `NON_INTERACTIVE=1` env to suppress color/prompts, SSE streaming, separate `chat_history.db`, Phase 2 ports hot paths to Python.
 
-3. **[2026-07-12] Transform into Company Secret Data RAG (defense/tech products)**
+3. **[2026-07-14] Flask GUI backlog: UI polish + memory features**
+   Do instead: See `.claude/plans/flask_gui_design.md#backlog--future-work` and `.claude/plans/flask_gui_backlog_implementation.md`. Includes: lazy-load chat list, 3-dots menu (rename/delete chat), per-chat session memory, global cross-session memory with inspector UI.
+
+4. **[2026-07-14] Flask GUI backlog: context window monitor (qwen2.5:1.5b pressure)**
+   Do instead: See `.claude/plans/flask_gui_context_window_monitor.md`. Estimate prompt + chat history + memory context size; warn before hitting model's context ceiling. Display live % usage in chat header. Integrate with memory features to prevent truncation.
+
+5. **[2026-07-12] Transform into Company Secret Data RAG (defense/tech products)**
    Do instead: See detailed plan in `.claude/plans/ragsec_company_variant.md`. Key: monorepo variant (RAGSEC_MODE flag), RBAC with 4 roles + clearance levels, doc classification (public/internal/confidential/secret), DLP rule engine with regex patterns, audit logging (append-only, hash-chained, 365-day retention), alter existing schema additively (no breaking changes).
