@@ -41,6 +41,173 @@
         messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    // --- Markdown rendering ---------------------------------------------
+    // Small, dependency-free markdown-to-HTML converter. No CDN / npm
+    // package is used on purpose: the app must keep working 100% offline
+    // (see CLAUDE.md), so a vendored or network-fetched library is avoided
+    // in favor of a compact hand-rolled renderer covering the common
+    // subset (headers, bold/italic, inline code, code blocks, lists,
+    // blockquotes, links). Input is HTML-escaped first so nothing in a
+    // model response (or a source document it quotes) can inject markup.
+    function escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+    }
+
+    function renderInline(text) {
+        // text is already HTML-escaped.
+        text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (m, label, url) {
+            return '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + label + "</a>";
+        });
+        text = text.replace(/`([^`]+)`/g, "<code>$1</code>");
+        text = text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        text = text.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+        text = text.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+        text = text.replace(/(^|[^\w])_([^_]+)_(?=[^\w]|$)/g, "$1<em>$2</em>");
+        return text;
+    }
+
+    function renderMarkdown(raw) {
+        if (!raw) return "";
+        const lines = escapeHtml(raw).split("\n");
+
+        let html = "";
+        let inCodeBlock = false;
+        let codeBuffer = [];
+        let listType = null; // "ul" | "ol"
+        let paragraphBuffer = [];
+
+        function flushParagraph() {
+            if (paragraphBuffer.length) {
+                // Join with <br> (not a space) so a single "\n" in the model's
+                // response still produces a visible line break, matching the
+                // literal newlines the model actually emits rather than
+                // collapsing them the way strict markdown reflow would.
+                html += "<p>" + renderInline(paragraphBuffer.join("<br>")) + "</p>";
+                paragraphBuffer = [];
+            }
+        }
+        function closeList() {
+            if (listType) {
+                html += "</" + listType + ">";
+                listType = null;
+            }
+        }
+
+        lines.forEach(function (line) {
+            if (/^```/.test(line)) {
+                if (inCodeBlock) {
+                    html += "<pre><code>" + codeBuffer.join("\n") + "</code></pre>";
+                    codeBuffer = [];
+                    inCodeBlock = false;
+                } else {
+                    flushParagraph();
+                    closeList();
+                    inCodeBlock = true;
+                }
+                return;
+            }
+            if (inCodeBlock) {
+                codeBuffer.push(line);
+                return;
+            }
+
+            const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
+            const ulMatch = line.match(/^\s*[-*+]\s+(.*)$/);
+            const olMatch = line.match(/^\s*\d+\.\s+(.*)$/);
+            const bqMatch = line.match(/^>\s?(.*)$/);
+
+            if (headerMatch) {
+                flushParagraph();
+                closeList();
+                const level = headerMatch[1].length;
+                html += "<h" + level + ">" + renderInline(headerMatch[2]) + "</h" + level + ">";
+            } else if (ulMatch) {
+                flushParagraph();
+                if (listType !== "ul") { closeList(); html += "<ul>"; listType = "ul"; }
+                html += "<li>" + renderInline(ulMatch[1]) + "</li>";
+            } else if (olMatch) {
+                flushParagraph();
+                if (listType !== "ol") { closeList(); html += "<ol>"; listType = "ol"; }
+                html += "<li>" + renderInline(olMatch[1]) + "</li>";
+            } else if (bqMatch && line.trim().length) {
+                flushParagraph();
+                closeList();
+                html += "<blockquote>" + renderInline(bqMatch[1]) + "</blockquote>";
+            } else if (line.trim() === "") {
+                flushParagraph();
+                closeList();
+            } else {
+                paragraphBuffer.push(line.trim());
+            }
+        });
+
+        // Unterminated fence (e.g. mid-stream): flush what we have so far
+        // rather than losing it; a later re-render (with the closing ```
+        // token) will clean it up.
+        if (inCodeBlock) {
+            html += "<pre><code>" + codeBuffer.join("\n") + "</code></pre>";
+        }
+        flushParagraph();
+        closeList();
+
+        return html;
+    }
+
+    // --- Copy-to-clipboard -------------------------------------------------
+    function fallbackCopy(text) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.top = "-1000px";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        return ok;
+    }
+
+    function createCopyButton(contentEl) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "copy-btn";
+        btn.textContent = "📋"; // 📋
+        btn.title = "Copiar resposta";
+        btn.setAttribute("aria-label", "Copiar resposta");
+
+        function showFeedback(ok) {
+            btn.textContent = ok ? "✅" : "❌"; // ✅ / ❌
+            btn.title = ok ? "Copiado!" : "Falhou ao copiar";
+            btn.setAttribute("aria-label", btn.title);
+            btn.classList.toggle("copied", ok);
+            setTimeout(function () {
+                btn.textContent = "📋"; // 📋
+                btn.title = "Copiar resposta";
+                btn.setAttribute("aria-label", "Copiar resposta");
+                btn.classList.remove("copied");
+            }, 1500);
+        }
+
+        btn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            const text = contentEl.dataset.raw || contentEl.textContent || "";
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text)
+                    .then(function () { showFeedback(true); })
+                    .catch(function () { showFeedback(fallbackCopy(text)); });
+            } else {
+                showFeedback(fallbackCopy(text));
+            }
+        });
+
+        return btn;
+    }
+
     function addMessage(role, content, opts) {
         opts = opts || {};
         const wrap = document.createElement("div");
@@ -52,16 +219,27 @@
         const roleLabel = document.createElement("span");
         roleLabel.textContent = role === "user" ? "Advogado" : role === "error" ? "Erro" : "AI-RAGJus";
 
+        const rightGroup = document.createElement("span");
+        rightGroup.className = "message-role-right";
+
         const timeLabel = document.createElement("span");
         timeLabel.className = "message-timestamp";
         timeLabel.textContent = formatTime(new Date());
+        rightGroup.appendChild(timeLabel);
 
         roleLine.appendChild(roleLabel);
-        roleLine.appendChild(timeLabel);
+        roleLine.appendChild(rightGroup);
 
         const contentEl = document.createElement("div");
         contentEl.className = "message-content";
-        contentEl.textContent = content || "";
+        contentEl.dataset.raw = content || "";
+        if (role === "assistant") {
+            contentEl.classList.add("markdown-content");
+            contentEl.innerHTML = renderMarkdown(content || "");
+            rightGroup.appendChild(createCopyButton(contentEl));
+        } else {
+            contentEl.textContent = content || "";
+        }
         if (opts.streaming) {
             contentEl.classList.add("cursor-blink");
         }
@@ -247,14 +425,16 @@
                     pendingScope = [];
                 } else if (event.type === "token") {
                     accumulated += event.content || "";
-                    assistantContentEl.textContent = accumulated;
+                    assistantContentEl.dataset.raw = accumulated;
+                    assistantContentEl.innerHTML = renderMarkdown(accumulated);
                     scrollToBottom();
                 } else if (event.type === "sources") {
                     sources = event.content || [];
                 } else if (event.type === "error") {
                     sawError = true;
                     accumulated += (accumulated ? "\n" : "") + "[Erro] " + event.content;
-                    assistantContentEl.textContent = accumulated;
+                    assistantContentEl.dataset.raw = accumulated;
+                    assistantContentEl.innerHTML = renderMarkdown(accumulated);
                     assistantContentEl.closest(".message").classList.add("error");
                 }
                 // "done" is a no-op; the loop ends when the stream closes.
@@ -262,7 +442,8 @@
         } catch (err) {
             sawError = true;
             accumulated += (accumulated ? "\n" : "") + "[Erro de conexão] " + err.message;
-            assistantContentEl.textContent = accumulated;
+            assistantContentEl.dataset.raw = accumulated;
+            assistantContentEl.innerHTML = renderMarkdown(accumulated);
             assistantContentEl.closest(".message").classList.add("error");
         }
 

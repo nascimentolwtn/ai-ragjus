@@ -18,9 +18,8 @@ Thumbs.db
 node_modules/\n.env\n.DS_Store
 
 # DB
-.cache_vetorial/rag_store.db
 *.db
-/.cache_vetorial
+.cache_vetorial
 
 # Python / Virtual Environment
 venv/
@@ -37,3 +36,4 @@ pip-delete-this-directory.txt
 # Flask / Web app
 web/data/
 web/data/*.db
+.cache_vetorial/rag_store.db

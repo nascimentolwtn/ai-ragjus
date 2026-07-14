@@ -339,6 +339,12 @@ html, body {
 .message.user .message-role { color: var(--accent); }
 .message.error .message-role { color: var(--error); }
 
+.message-role-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .message-content {
     white-space: pre-wrap;
     word-wrap: break-word;
@@ -351,6 +357,114 @@ html, body {
     color: var(--text-dim);
     text-transform: none;
     letter-spacing: 0;
+}
+
+.copy-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    text-transform: none;
+    letter-spacing: 0;
+    font-family: inherit;
+    font-size: 0.85rem;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.copy-btn:active {
+    transform: scale(0.92);
+}
+
+.copy-btn:hover {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.copy-btn.copied {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* Markdown-rendered assistant content: block elements handle their own
+   spacing/wrapping, so plain pre-wrap (meant for the raw-text fallback
+   used by user/error messages) is turned off here. */
+.message-content.markdown-content {
+    white-space: normal;
+}
+
+.message-content.markdown-content > *:first-child { margin-top: 0; }
+.message-content.markdown-content > *:last-child { margin-bottom: 0; }
+
+.message-content p {
+    margin: 0 0 0.6em 0;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4,
+.message-content h5,
+.message-content h6 {
+    margin: 0.8em 0 0.4em 0;
+    line-height: 1.3;
+    color: var(--text);
+}
+
+.message-content h1 { font-size: 1.25em; }
+.message-content h2 { font-size: 1.12em; }
+.message-content h3 { font-size: 1.04em; }
+
+.message-content ul,
+.message-content ol {
+    margin: 0.3em 0 0.6em 0;
+    padding-left: 1.4em;
+}
+
+.message-content li {
+    margin: 0.15em 0;
+}
+
+.message-content code {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+    font-size: 0.88em;
+}
+
+.message-content pre {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+}
+
+.message-content pre code {
+    background: none;
+    border: none;
+    padding: 0;
+}
+
+.message-content blockquote {
+    margin: 0.5em 0;
+    padding: 2px 12px;
+    border-left: 3px solid var(--accent-dim);
+    color: var(--text-dim);
+}
+
+.message-content a {
+    color: var(--accent);
 }
 
 .sources {
