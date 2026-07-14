@@ -115,7 +115,8 @@ cd /path/to/ai-ragjus
 
 ```bash
 # Terminal 1: Start Ollama (keeps running)
-ollama serve
+docker ps   # make sure docker ollama is running
+~/docker-ollama.sh   # start docker ollama 
 
 # Terminal 2: Start Flask web server
 cd /path/to/ai-ragjus/web
@@ -158,7 +159,6 @@ Edit `config.conf` for:
 **Backend Selection:**
 - Use menu option 6 → Advanced Configuration → "Alterar Backend de Inferência" to switch
 - **ollama** (default): Ollama `/api/generate` endpoint at `localhost:11434`
-- **llamacpp**: llama.cpp OpenAI-compatible `/v1/chat/completions` at `localhost:8000`
 
 **Restart jus.sh (or Flask) after changing config.conf.**
 
