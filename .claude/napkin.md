@@ -63,19 +63,19 @@
 
 ## Product Backlog (Prioritized + Planned)
 
-2. **[2026-07-12] Build Flask web GUI (ChatGPT-like UI + chat history)**
+2. ✅ **[2026-07-12] Build Flask web GUI (ChatGPT-like UI + chat history)**
    Do instead: See detailed plan in `.claude/plans/flask_gui_design.md`. Key: bridge src/*.sh modules as subprocesses (Phase 1), reuse existing `gerar_embedding`/`perguntar_ollama`/`buscar_trechos_relevantes`, add `NON_INTERACTIVE=1` env to suppress color/prompts, SSE streaming, separate `chat_history.db`, Phase 2 ports hot paths to Python.
 
-3. **[2026-07-14] Flask GUI backlog: UI polish + memory features**
-   Do instead: See `.claude/plans/flask_gui_design.md#backlog--future-work` and `.claude/plans/flask_gui_backlog_implementation.md`. Includes: lazy-load chat list, 3-dots menu (rename/delete chat), per-chat session memory, global cross-session memory with inspector UI.
+3. ✅ **[2026-07-14] Flask GUI backlog: UI polish + memory features**
+   Do instead: See `.claude/plans/flask_gui_design.md#backlog--future-work` and `.claude/plans/flask_gui_backlog_implementation.md`. Shipped: lazy-load chat list (pagination + infinite scroll), 3-dots menu (rename/delete chat, cascade), per-chat session memory (`session_memory` table + `web/memory.py` extraction), global cross-session memory with `/settings` inspector UI (`global_memory` table, manual+auto CRUD). `RAG_MEMORY_CONTEXT` env hook in `src/rag_query.sh` wires both into the prompt.
 
-4. **[2026-07-14] Flask GUI backlog: context window monitor (qwen2.5:coder-7b pressure)**
-   Do instead: See `.claude/plans/flask_gui_context_window_monitor.md`. Estimate per-turn prompt size; wire `num_ctx` in `ai.sh`; emit `prompt_eval_count` stats. Display live % usage in chat header. Integrate with memory features to prevent truncation.
+4. ✅ **[2026-07-14] Flask GUI backlog: context window monitor (qwen2.5:coder-7b pressure)**
+   Do instead: See `.claude/plans/flask_gui_context_window_monitor.md`. Shipped: `CONTEXT_WINDOW` now wired as `num_ctx` in `ai.sh` (was silently ignored — Ollama defaulted to 4096); `web/context_tracker.py` estimates per-turn usage (`POST /api/sessions/<id>/context-usage`), reconciled with Ollama's exact `prompt_eval_count` via a new `{"type":"stats"}` SSE event once the turn completes. Color-coded badge in chat header (safe/caution/warning/critical).
 
 5. **[2026-07-14] Enhance .md/.txt/.json document ingestion (metadata + structure)**
    Do instead: Currently `src/ingest.sh:31-33` uses raw `cat`. Improve: extract Markdown headings as context markers, strip YAML frontmatter into metadata, preserve code-block language tags, handle CSV as structured text (headers bold), flatten JSON objects into readable key:value text with nesting depth. Preserve semantic structure to improve RAG chunk relevance. See `src/ingest.sh` for extension point.
 
-6. **[2026-07-14] Multi-doc scope selector (NotebookLM-style document focus)**
+6. ✅ **[2026-07-14] Multi-doc scope selector (NotebookLM-style document focus)**
    Do instead: See `.claude/plans/multi_doc_scope_selector.md`. Key: `SCOPE_DOCS` env var (JSON array of absolute paths) → `caminho_arquivo IN (...)` condition in `src/vector.sh` (jq-escaped single quotes); per-session scope in `web/data/chat_history.db` (`session_doc_scope` table); new `POST /api/sessions` + scope endpoints; sidebar folder tree + header pills. Explicit scope disables the process-number heuristic; empty scope = all docs.
 
 7. **[2026-07-12] Transform into Company Secret Data RAG (defense/tech products)**
