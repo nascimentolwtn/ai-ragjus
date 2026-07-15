@@ -76,6 +76,22 @@ CREATE TABLE IF NOT EXISTS global_memory (
     created_at  TEXT DEFAULT (datetime('now')),
     updated_at  TEXT DEFAULT (datetime('now'))
 );
+
+-- Session-scoped file attachments (backlog item 9): chunks + embeddings of
+-- files dragged/attached into a single chat session. Separate from the RAG
+-- vector store (.cache_vetorial/rag_store.db) - never written there, and
+-- cascade-deleted automatically when the owning session is deleted (see
+-- ON DELETE CASCADE + `PRAGMA foreign_keys = ON` in get_conn()).
+CREATE TABLE IF NOT EXISTS session_embeddings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    chunk_id    INTEGER NOT NULL,
+    text        TEXT NOT NULL,
+    embedding   TEXT NOT NULL,        -- JSON array (same format as rag_store.db)
+    file_name   TEXT NOT NULL,
+    created_at  TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_session_embeddings_session ON session_embeddings(session_id);
 """
 
 
@@ -378,3 +394,27 @@ def evict_oldest_auto_global_memory():
             "  ORDER BY created_at ASC LIMIT 1"
             ")"
         )
+
+
+# --- Session-scoped file attachments (item 9) ------------------------------
+
+def add_session_embedding(session_id, chunk_id, text, embedding, file_name):
+    embedding_json = json.dumps(embedding, ensure_ascii=False)
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO session_embeddings "
+            "(session_id, chunk_id, text, embedding, file_name) VALUES (?, ?, ?, ?, ?)",
+            (session_id, chunk_id, text, embedding_json, file_name),
+        )
+
+
+def list_session_attachments(session_id):
+    """Distinct files attached to a session, with chunk/char counts (for UI)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT file_name, COUNT(*) AS chunks, SUM(LENGTH(text)) AS chars "
+            "FROM session_embeddings WHERE session_id = ? "
+            "GROUP BY file_name ORDER BY MIN(created_at) ASC",
+            (session_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]

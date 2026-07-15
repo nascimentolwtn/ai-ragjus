@@ -80,3 +80,9 @@
 
 7. **[2026-07-12] Transform into Company Secret Data RAG (defense/tech products)**
    Do instead: See detailed plan in `.claude/plans/ragsec_company_variant.md`. Key: monorepo variant (RAGSEC_MODE flag), RBAC with 4 roles + clearance levels, doc classification (public/internal/confidential/secret), DLP rule engine with regex patterns, audit logging (append-only, hash-chained, 365-day retention), alter existing schema additively (no breaking changes).
+
+8. **[2026-07-15] Auto-compact context when reaching 80% threshold**
+   Do instead: When per-turn context usage (via `context_tracker.py` estimate) hits 80% of `CONTEXT_WINDOW`, auto-trigger summarize hook in Flask chat UI: inject a system checkpoint message "📋 Context summary at turn N: [consolidated facts, topics discussed, key decisions]" into `session_memory` table, truncate the working context window, and inject the summary into the next turn's prompt. Prevents token overflow mid-response while preserving conversation thread via memory. Configure threshold + enable/disable toggle in `/settings` page. See `web/context_tracker.py` for usage tracking, `web/memory.py` for persistence.
+
+9. ✅ **[2026-07-15] Attach files to instantly add new RAG context (session-scoped)**
+   Do instead: Shipped: 📎 button + drag-drop overlay in chat UI → `POST /api/sessions/<id>/attach-file` → `src/attach_file.sh` (new bash bridge, mirrors `rag_query.sh`'s pattern) sources `extrair_texto_limpo`/`fatiar_texto`/`gerar_embedding` unchanged and streams `{"type":"chunk",...}` JSON lines; `web/ingest.py` persists them into `session_embeddings` (new table, `web/db.py`, `ON DELETE CASCADE` on `sessions` — auto-discarded on delete, never touches `.cache_vetorial/`). `src/vector.sh::buscar_trechos_sessao` + `SESSION_EMBED_DB`/`SESSION_ID` env vars let `rag_query.sh` merge session chunks *ahead of* global results each turn. Added `json`/`py` to `extrair_texto_limpo`'s plain-text case. Toast + progress bar in `chat.js`.

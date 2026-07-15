@@ -28,7 +28,7 @@ extrair_texto_limpo() {
                 return 1
             fi
             ;;
-        txt|md|csv)
+        txt|md|csv|json|py)
             cat "$arquivo" 2>/dev/null || echo ""
             ;;
         *)

@@ -90,7 +90,7 @@ chmod +x setup.sh jus.sh
 
 ```bash
 # Terminal 1: Start Ollama (keeps running)
-ollama serve
+./docker-ollama.sh
 
 # Terminal 2: Run AI-RAGJus CLI
 cd /path/to/ai-ragjus

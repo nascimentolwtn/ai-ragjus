@@ -252,3 +252,69 @@ buscar_trechos_relevantes() {
         | {caminho: .caminho, texto: .texto, score: .similarity}
         ' | jq -s '.'
 }
+
+# Busca trechos relevantes nos anexos de sessão da interface Web (backlog item
+# 9: "Attach files to instantly add new RAG context (session-scoped)").
+#
+# Estes trechos vivem na tabela session_embeddings de web/data/chat_history.db
+# (banco GUI-owned, separado do acervo global .cache_vetorial/rag_store.db) e
+# NUNCA são persistidos no acervo global. Ativa apenas quando o chamador
+# (src/rag_query.sh, disparado por web/app.py) define SESSION_EMBED_DB e
+# SESSION_ID; ausência de qualquer um dos dois (uso normal via CLI/jus.sh)
+# retorna [] sem custo.
+buscar_trechos_sessao() {
+    local vetor_pergunta="$1"
+    local db_path="${SESSION_EMBED_DB:-}"
+    local session_id="${SESSION_ID:-}"
+    local limite=5
+
+    if [ -z "$db_path" ] || [ -z "$session_id" ] || [ ! -f "$db_path" ]; then
+        echo "[]"
+        return
+    fi
+
+    # session_id é sempre um inteiro gerado pelo Flask (AUTOINCREMENT id) -
+    # validação defensiva para nunca interpolar entrada arbitrária no SQL.
+    if ! [[ "$session_id" =~ ^[0-9]+$ ]]; then
+        echo "[]"
+        return
+    fi
+
+    local dados_json
+    dados_json=$(sqlite3 "$db_path" "SELECT json_object('caminho', ('📎 ' || file_name), 'texto', text, 'vetor', json(embedding)) FROM session_embeddings WHERE session_id = $session_id;" 2>/dev/null || echo "")
+
+    if [ -z "$dados_json" ]; then
+        echo "[]"
+        return
+    fi
+
+    local array_completo
+    array_completo=$(echo "$dados_json" | jq -s '.')
+
+    echo "$array_completo" | jq -c \
+        --argjson q "$vetor_pergunta" \
+        --argjson top "$limite" \
+        '
+        def dot_product(a; b):
+          a as $a | b as $b |
+          reduce range(0; $a | length) as $i (0; . + ($a[$i] * $b[$i]));
+
+        def magnitude(a):
+          a as $a |
+          reduce range(0; $a | length) as $i (0; . + ($a[$i] * $a[$i])) | sqrt;
+
+        def cosine_similarity(a; b):
+          magnitude(a) as $magA |
+          magnitude(b) as $magB |
+          if ($magA * $magB) == 0 then
+            0
+          else
+            dot_product(a; b) / ($magA * $magB)
+          end;
+
+        map(. + {similarity: cosine_similarity(.vetor; $q)})
+        | sort_by(-.similarity)
+        | limit($top; .[])
+        | {caminho: .caminho, texto: .texto, score: .similarity}
+        ' | jq -s '.'
+}

@@ -4,7 +4,8 @@
 
 {% block body %}
 <div class="app-shell">
-    <aside class="sidebar">
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+    <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <span class="brand">AI-RAGJus</span>
             <span class="brand-sub">100% OFF-LINE</span>
@@ -44,6 +45,8 @@
 
     <main class="chat-pane">
         <header class="chat-header">
+            <button id="sidebar-toggle" class="sidebar-toggle-btn" type="button"
+                    title="Abrir/fechar menu" aria-label="Abrir/fechar menu" aria-expanded="false">&#9776;</button>
             <h1>Chat Jurídico RAG</h1>
             <div class="scope-pills" id="scope-pills" title="Documentos no escopo desta conversa">
                 <!-- rendered by chat.js: "3 de 12 docs" + pills for each selected file -->
@@ -76,9 +79,21 @@
                     mais relevantes encontrados.
                 </div>
             </div>
+
+            <div class="drop-overlay" id="drop-overlay">
+                <div class="drop-overlay-content">
+                    📎 Solte o arquivo para anexar a esta conversa
+                    <span class="drop-overlay-sub">.pdf .docx .txt .md .json .py — apenas nesta sessão</span>
+                </div>
+            </div>
         </div>
 
+        <div class="attachments-bar" id="attachments-bar" hidden></div>
+
         <form id="chat-form" class="chat-input-form" autocomplete="off">
+            <input type="file" id="attach-file-input" class="attach-file-input" hidden
+                   accept=".pdf,.docx,.txt,.md,.json,.py" multiple>
+            <button type="button" id="attach-btn" class="attach-btn" title="Anexar arquivo a esta conversa (apenas nesta sessão)">📎</button>
             <textarea
                 id="chat-input"
                 class="chat-input"
@@ -89,6 +104,8 @@
         </form>
     </main>
 </div>
+
+<div class="toast-container" id="toast-container" aria-live="polite"></div>
 
 <script src="{{ url_for('static', filename='chat.js') }}"></script>
 {% endblock %}

@@ -27,6 +27,7 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 # invoked (python web/app.py, flask --app web/app run, gunicorn web.app:app, ...).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import db  # noqa: E402
+import ingest  # noqa: E402
 import memory  # noqa: E402
 from context_tracker import ContextTracker  # noqa: E402
 
@@ -77,6 +78,16 @@ def load_config():
             if key in config:
                 config[key] = value
     return config
+
+
+# Bound multipart upload size (item 9 attach-file) at the Flask level too, not
+# just in ingest.py after the fact - avoids buffering an oversized upload to
+# disk before rejecting it. +1MB slack covers multipart boundary/header overhead.
+try:
+    _max_upload_mb = float(load_config().get("MAX_FILE_SIZE_MB", 50) or 50)
+except (TypeError, ValueError):
+    _max_upload_mb = 50.0
+app.config["MAX_CONTENT_LENGTH"] = int(_max_upload_mb * 1024 * 1024) + 1024 * 1024
 
 
 def _derive_title(text, max_words=8):
@@ -259,6 +270,43 @@ def api_delete_session_memory(session_id, memory_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/sessions/<int:session_id>/attach-file", methods=["POST"])
+def api_attach_file(session_id):
+    """Backlog item 9: attach a file to THIS session only.
+
+    Extracts + chunks + embeds via src/attach_file.sh (reusing the CLI's
+    extrair_texto_limpo / fatiar_texto / gerar_embedding), then stores the
+    chunks in the GUI-owned session_embeddings table. Never written to
+    .cache_vetorial/rag_store.db - closing/deleting the session discards it
+    (cascade delete, see web/db.py schema).
+    """
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+
+    file_storage = request.files.get("file")
+    if not file_storage or not file_storage.filename:
+        return jsonify({"error": "Nenhum arquivo enviado."}), 400
+
+    config = load_config()
+    try:
+        result = ingest.attach_file(session_id, file_storage, config)
+    except ingest.AttachFileError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - defensive, never 500 silently
+        app.logger.exception("attach-file failed for session %s", session_id)
+        return jsonify({"error": f"Falha inesperada ao processar o arquivo: {exc}"}), 500
+
+    return jsonify({"status": "ok", **result}), 201
+
+
+@app.route("/api/sessions/<int:session_id>/attachments", methods=["GET"])
+def api_list_attachments(session_id):
+    """List files currently attached to this session (for UI restore on reload)."""
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+    return jsonify({"attachments": db.list_session_attachments(session_id)})
+
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     payload = request.get_json(silent=True) or {}
@@ -291,6 +339,12 @@ def api_chat():
             scope = {"selected_docs": inline_docs}
         if scope and scope["selected_docs"]:
             env["SCOPE_DOCS"] = json.dumps(scope["selected_docs"], ensure_ascii=False)
+
+        # Item 9: let rag_query.sh merge in this session's attached-file chunks
+        # (session_embeddings table) ahead of the global vector store results.
+        # Cheap no-op when the session has no attachments.
+        env["SESSION_EMBED_DB"] = str(db.DB_PATH)
+        env["SESSION_ID"] = str(session_id)
 
         # M0/M3/M4: inject accumulated session + global memory facts, if any.
         memory_context = memory.build_memory_context(session_id)
@@ -450,6 +504,15 @@ def api_sync():
             "Connection": "keep-alive",
         },
     )
+
+
+@app.errorhandler(413)
+def _handle_upload_too_large(_exc):
+    """JSON error for oversized attach-file uploads (see MAX_CONTENT_LENGTH),
+    instead of Flask's default HTML error page - the client always expects JSON.
+    """
+    limit_mb = app.config.get("MAX_CONTENT_LENGTH", 0) / (1024 * 1024)
+    return jsonify({"error": f"Arquivo excede o limite de {limit_mb:.0f}MB."}), 413
 
 
 @app.route("/settings")

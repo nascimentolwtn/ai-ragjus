@@ -17,6 +17,9 @@
     const statusDot = document.getElementById("status-dot");
     const sessionListEl = document.getElementById("session-list");
     const newChatBtn = document.getElementById("new-chat-btn");
+    const sidebarToggleBtn = document.getElementById("sidebar-toggle");
+    const sidebarEl = document.getElementById("sidebar");
+    const sidebarOverlayEl = document.getElementById("sidebar-overlay");
 
     let currentSessionId = null;
     let sending = false;
@@ -32,6 +35,39 @@
         if (state === "busy") statusDot.classList.add("busy");
         if (state === "error") statusDot.classList.add("error");
     }
+
+    // --- Mobile sidebar toggle ---------------------------------------------
+    // The sidebar is always visible on desktop (CSS media query keeps the
+    // toggle button hidden there); on narrow screens it starts off-canvas and
+    // slides in as an overlay so the chat pane stays full-width underneath.
+    function openSidebar() {
+        if (!sidebarEl) return;
+        sidebarEl.classList.add("sidebar-open");
+        if (sidebarOverlayEl) sidebarOverlayEl.classList.add("visible");
+        if (sidebarToggleBtn) sidebarToggleBtn.setAttribute("aria-expanded", "true");
+    }
+
+    function closeSidebar() {
+        if (!sidebarEl) return;
+        sidebarEl.classList.remove("sidebar-open");
+        if (sidebarOverlayEl) sidebarOverlayEl.classList.remove("visible");
+        if (sidebarToggleBtn) sidebarToggleBtn.setAttribute("aria-expanded", "false");
+    }
+
+    if (sidebarToggleBtn) {
+        sidebarToggleBtn.addEventListener("click", function () {
+            if (sidebarEl.classList.contains("sidebar-open")) closeSidebar();
+            else openSidebar();
+        });
+    }
+
+    if (sidebarOverlayEl) {
+        sidebarOverlayEl.addEventListener("click", closeSidebar);
+    }
+
+    document.addEventListener("keydown", function (ev) {
+        if (ev.key === "Escape") closeSidebar();
+    });
 
     function formatTime(date) {
         return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -172,13 +208,16 @@
         return ok;
     }
 
-    function createCopyButton(contentEl) {
+    function createCopyButton(contentEl, label) {
+        label = label || "resposta";
+        const idleTitle = "Copiar " + label;
+
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "copy-btn";
         btn.textContent = "📋"; // 📋
-        btn.title = "Copiar resposta";
-        btn.setAttribute("aria-label", "Copiar resposta");
+        btn.title = idleTitle;
+        btn.setAttribute("aria-label", idleTitle);
 
         function showFeedback(ok) {
             btn.textContent = ok ? "✅" : "❌"; // ✅ / ❌
@@ -187,8 +226,8 @@
             btn.classList.toggle("copied", ok);
             setTimeout(function () {
                 btn.textContent = "📋"; // 📋
-                btn.title = "Copiar resposta";
-                btn.setAttribute("aria-label", "Copiar resposta");
+                btn.title = idleTitle;
+                btn.setAttribute("aria-label", idleTitle);
                 btn.classList.remove("copied");
             }, 1500);
         }
@@ -236,9 +275,12 @@
         if (role === "assistant") {
             contentEl.classList.add("markdown-content");
             contentEl.innerHTML = renderMarkdown(content || "");
-            rightGroup.appendChild(createCopyButton(contentEl));
+            rightGroup.appendChild(createCopyButton(contentEl, "resposta"));
         } else {
             contentEl.textContent = content || "";
+            if (role === "user") {
+                rightGroup.appendChild(createCopyButton(contentEl, "pergunta"));
+            }
         }
         if (opts.streaming) {
             contentEl.classList.add("cursor-blink");
@@ -591,7 +633,9 @@
                 });
                 markActiveSession(sessionId);
                 loadSessionScope(sessionId);
+                loadAttachmentsBar(sessionId);
                 updateContextUsage({});
+                closeSidebar();
             })
             .catch(function (err) {
                 addMessage("error", "Falha ao carregar conversa: " + err.message);
@@ -599,12 +643,14 @@
     }
 
     newChatBtn.addEventListener("click", function () {
+        closeSidebar();
         currentSessionId = null;
         pendingScope = [];
         clearMessages();
         addMessage("assistant",
             "Nova conversa iniciada. Faça uma pergunta sobre o seu acervo de documentos.");
         markActiveSession(null);
+        renderAttachmentsBar([]);
         Array.prototype.forEach.call(document.querySelectorAll(".doc-checkbox"), function (el) {
             el.checked = false;
         });
@@ -794,6 +840,208 @@
     }
 
     syncBtn.addEventListener("click", syncDocuments);
+
+    // --- File attachments (session-scoped RAG context, backlog item 9) -----
+    // Drag-drop or the paperclip button send a file to
+    // POST /api/sessions/<id>/attach-file, which extracts/chunks/embeds it
+    // (reusing the CLI's src/ingest.sh + src/ai.sh functions) and stores the
+    // result in the session_embeddings table - scoped to THIS conversation
+    // only. Never touches the global vector store; closing/deleting the
+    // session discards it. Injected ahead of global-store results on the
+    // next question (see src/rag_query.sh + src/vector.sh::buscar_trechos_sessao).
+    const attachBtn = document.getElementById("attach-btn");
+    const attachFileInput = document.getElementById("attach-file-input");
+    const dropOverlayEl = document.getElementById("drop-overlay");
+    const attachmentsBarEl = document.getElementById("attachments-bar");
+    const toastContainerEl = document.getElementById("toast-container");
+
+    function formatBytes(bytes) {
+        bytes = bytes || 0;
+        if (bytes < 1024) return bytes + "B";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + "KB";
+        return (bytes / (1024 * 1024)).toFixed(1) + "MB";
+    }
+
+    function showToast(message, kind, opts) {
+        opts = opts || {};
+        const toast = document.createElement("div");
+        toast.className = "toast" + (kind ? " toast-" + kind : "");
+
+        const textEl = document.createElement("div");
+        textEl.className = "toast-text";
+        textEl.textContent = message;
+        toast.appendChild(textEl);
+
+        if (opts.progress) {
+            const track = document.createElement("div");
+            track.className = "toast-progress-track";
+            const bar = document.createElement("div");
+            bar.className = "toast-progress-bar";
+            track.appendChild(bar);
+            toast.appendChild(track);
+            toast._bar = bar;
+        }
+
+        toastContainerEl.appendChild(toast);
+
+        if (!opts.sticky) {
+            dismissToast(toast, opts.duration || 4000);
+        }
+        return toast;
+    }
+
+    function dismissToast(toast, delay) {
+        setTimeout(function () {
+            toast.classList.add("toast-out");
+            setTimeout(function () { toast.remove(); }, 250);
+        }, delay);
+    }
+
+    function updateToastProgress(toast, pct) {
+        if (toast && toast._bar) {
+            toast._bar.style.width = Math.max(0, Math.min(100, pct)) + "%";
+        }
+    }
+
+    function finishToast(toast, message, kind, duration) {
+        if (!toast) return;
+        toast.className = "toast" + (kind ? " toast-" + kind : "");
+        const textEl = toast.querySelector(".toast-text");
+        if (textEl) textEl.textContent = message;
+        const track = toast.querySelector(".toast-progress-track");
+        if (track) track.remove();
+        dismissToast(toast, duration || 5000);
+    }
+
+    function renderAttachmentsBar(attachments) {
+        if (!attachmentsBarEl) return;
+        attachmentsBarEl.innerHTML = "";
+        if (!attachments || !attachments.length) {
+            attachmentsBarEl.hidden = true;
+            return;
+        }
+        attachmentsBarEl.hidden = false;
+        attachments.forEach(function (att) {
+            const pill = document.createElement("span");
+            pill.className = "attachment-pill";
+            pill.title = att.chunks + " trecho(s) — " + formatBytes(att.chars) + " (apenas nesta conversa)";
+            pill.textContent = "📎 " + att.file_name;
+            attachmentsBarEl.appendChild(pill);
+        });
+    }
+
+    function loadAttachmentsBar(sessionId) {
+        if (!sessionId) {
+            renderAttachmentsBar([]);
+            return;
+        }
+        fetch("/api/sessions/" + sessionId + "/attachments")
+            .then(function (r) { return r.json(); })
+            .then(function (data) { renderAttachmentsBar(data.attachments || []); })
+            .catch(function () { renderAttachmentsBar([]); });
+    }
+
+    function ensureSessionForAttach() {
+        if (currentSessionId) return Promise.resolve(currentSessionId);
+        return fetch("/api/sessions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: "Nova conversa" }),
+        })
+            .then(function (r) {
+                if (!r.ok) throw new Error("Não foi possível iniciar a conversa.");
+                return r.json();
+            })
+            .then(function (data) {
+                currentSessionId = data.session_id;
+                markActiveSession(currentSessionId);
+                refreshSessionList();
+                return currentSessionId;
+            });
+    }
+
+    function uploadAttachment(file) {
+        ensureSessionForAttach().then(function (sessionId) {
+            const toast = showToast("Enviando " + file.name + "...", "progress",
+                { progress: true, sticky: true });
+
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "/api/sessions/" + sessionId + "/attach-file");
+
+            xhr.upload.addEventListener("progress", function (ev) {
+                if (ev.lengthComputable) {
+                    updateToastProgress(toast, (ev.loaded / ev.total) * 100);
+                }
+            });
+
+            xhr.addEventListener("load", function () {
+                let data = {};
+                try { data = JSON.parse(xhr.responseText); } catch (e) { /* non-JSON, fall through */ }
+
+                if (xhr.status >= 200 && xhr.status < 300 && data.status === "ok") {
+                    finishToast(
+                        toast,
+                        "Adicionado " + data.chunks_added + " trecho(s) (" +
+                            formatBytes(data.size_bytes) + ") de " + data.file_name,
+                        "success"
+                    );
+                    loadAttachmentsBar(sessionId);
+                } else {
+                    finishToast(toast, data.error || ("Falha ao anexar " + file.name + "."), "error");
+                }
+            });
+
+            xhr.addEventListener("error", function () {
+                finishToast(toast, "Falha de conexão ao anexar " + file.name + ".", "error");
+            });
+
+            const formData = new FormData();
+            formData.append("file", file);
+            xhr.send(formData);
+        }).catch(function (err) {
+            showToast(err.message || "Não foi possível anexar o arquivo.", "error");
+        });
+    }
+
+    function handleAttachFiles(fileList) {
+        Array.prototype.forEach.call(fileList || [], function (file) {
+            uploadAttachment(file);
+        });
+    }
+
+    if (attachBtn && attachFileInput) {
+        attachBtn.addEventListener("click", function () {
+            attachFileInput.click();
+        });
+        attachFileInput.addEventListener("change", function () {
+            handleAttachFiles(attachFileInput.files);
+            attachFileInput.value = "";
+        });
+    }
+
+    if (dropOverlayEl) {
+        let dragCounter = 0;
+        messagesEl.addEventListener("dragenter", function (ev) {
+            ev.preventDefault();
+            dragCounter++;
+            dropOverlayEl.classList.add("drop-overlay-visible");
+        });
+        messagesEl.addEventListener("dragover", function (ev) {
+            ev.preventDefault();
+        });
+        messagesEl.addEventListener("dragleave", function () {
+            dragCounter = Math.max(0, dragCounter - 1);
+            if (dragCounter === 0) dropOverlayEl.classList.remove("drop-overlay-visible");
+        });
+        messagesEl.addEventListener("drop", function (ev) {
+            ev.preventDefault();
+            dragCounter = 0;
+            dropOverlayEl.classList.remove("drop-overlay-visible");
+            if (ev.dataTransfer && ev.dataTransfer.files) {
+                handleAttachFiles(ev.dataTransfer.files);
+            }
+        });
+    }
 
     // --- Multi-doc scope selector ------------------------------------------
     // Sidebar folder tree (checkboxes) + header pills. Scope is per-session,

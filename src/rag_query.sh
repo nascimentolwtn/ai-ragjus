@@ -18,6 +18,11 @@
 # caminhos absolutos para restringir a busca/prompt a esse subconjunto do
 # acervo (ver .claude/plans/multi_doc_scope_selector.md). Teste manual:
 #
+# Anexos de sessão (opcional, backlog item 9): defina SESSION_EMBED_DB
+# (caminho para web/data/chat_history.db) e SESSION_ID para injetar trechos
+# de arquivos anexados pelo usuário àquela conversa (tabela session_embeddings)
+# à frente dos trechos do acervo global. Ver src/vector.sh::buscar_trechos_sessao.
+#
 #   # Baseline (sem escopo)
 #   NON_INTERACTIVE=1 bash src/rag_query.sh "uma pergunta qualquer" | jq '.sources | length'
 #
@@ -76,6 +81,16 @@ fi
 
 # 2. Busca trechos semelhantes (passa a query original para filtro de acervo)
 trechos=$(buscar_trechos_relevantes "$vetor_query" "$query" 2>/dev/null || echo "[]")
+
+# 2b. Backlog item 9: mescla trechos de anexos de sessão (session_embeddings,
+# escopados à conversa atual via SESSION_EMBED_DB/SESSION_ID) NA FRENTE dos
+# trechos do acervo global - o usuário anexou o arquivo propositalmente para
+# esta pergunta, então ele deve ter prioridade nas fontes citadas. Sem custo
+# quando a feature não está em uso (retorna [] e o merge é um no-op).
+trechos_sessao=$(buscar_trechos_sessao "$vetor_query" 2>/dev/null || echo "[]")
+if [ "$trechos_sessao" != "[]" ]; then
+    trechos=$(jq -c -n --argjson a "$trechos_sessao" --argjson b "$trechos" '$a + $b' 2>/dev/null || echo "$trechos")
+fi
 
 # 3. Serializa as fontes localizadas (nome do arquivo + score) para a UI
 fontes_json=$(echo "$trechos" | jq -c '[.[] | {caminho: .caminho, score: .score}]' 2>/dev/null || echo "[]")
