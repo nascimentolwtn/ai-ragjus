@@ -18,6 +18,7 @@ carregar_configuracoes() {
     PASTA_ALVO="./docs"
     CACHE_DIR="./.cache_vetorial"
     OLLAMA_URL="http://localhost:11434"
+    OLLAMA_URL_GPU="http://localhost:11435"
     MODELO_IA="qwen2.5:7b"
     MODELO_EMBEDDING="nomic-embed-text"
     MAX_FILE_SIZE_MB=50
@@ -43,6 +44,7 @@ carregar_configuracoes() {
                 PASTA_ALVO) PASTA_ALVO="$value" ;;
                 CACHE_DIR) CACHE_DIR="$value" ;;
                 OLLAMA_URL) OLLAMA_URL="$value" ;;
+                OLLAMA_URL_GPU) OLLAMA_URL_GPU="$value" ;;
                 MODELO_IA) MODELO_IA="$value" ;;
                 MODELO_EMBEDDING) MODELO_EMBEDDING="$value" ;;
                 MAX_FILE_SIZE_MB) MAX_FILE_SIZE_MB="$value" ;;
@@ -57,7 +59,7 @@ carregar_configuracoes() {
     fi
 
     # Exporta para os outros scripts
-    export PASTA_ALVO CACHE_DIR OLLAMA_URL MODELO_IA MODELO_EMBEDDING MAX_FILE_SIZE_MB CHUNK_SIZE CHUNK_OVERLAP TEMPERATURA CONTEXT_WINDOW RAGSEC_MODE AUDIT_RETENTION_DIAS
+    export PASTA_ALVO CACHE_DIR OLLAMA_URL OLLAMA_URL_GPU MODELO_IA MODELO_EMBEDDING MAX_FILE_SIZE_MB CHUNK_SIZE CHUNK_OVERLAP TEMPERATURA CONTEXT_WINDOW RAGSEC_MODE AUDIT_RETENTION_DIAS
 }
 
 # Atualiza uma chave de configuração no config.conf
@@ -76,6 +78,7 @@ atualizar_configuracao() {
         PASTA_ALVO) PASTA_ALVO="$valor" ;;
         CACHE_DIR) CACHE_DIR="$valor" ;;
         OLLAMA_URL) OLLAMA_URL="$valor" ;;
+        OLLAMA_URL_GPU) OLLAMA_URL_GPU="$valor" ;;
         MODELO_IA) MODELO_IA="$valor" ;;
         MODELO_EMBEDDING) MODELO_EMBEDDING="$valor" ;;
         MAX_FILE_SIZE_MB) MAX_FILE_SIZE_MB="$valor" ;;

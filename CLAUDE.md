@@ -103,20 +103,108 @@ cd /path/to/ai-ragjus
 → See response + source documents cited
 ```
 
+### Dual Ollama Instances (Recommended for Production)
+
+For optimal performance, run two Ollama instances in parallel to eliminate GPU/CPU contention:
+
+**Instance 1 (port 11434):** CPU-only — embedding model (nomic-embed-text)  
+**Instance 2 (port 11435):** GPU-enabled — inference model (qwen2.5:1.5b or similar)
+
+**Quick Start:**
+
+```bash
+# Terminal 1: Start dual Ollama instances
+bash web/run_dual_ollama.sh
+
+# Terminal 2: Run AI-RAGJus CLI or Flask
+cd /path/to/ai-ragjus
+./jus.sh    # or: cd web && ./run.sh
+```
+
+**Manual Setup (if preferred):**
+
+```bash
+# Terminal 1: CPU-only instance for embeddings
+CUDA_VISIBLE_DEVICES="" ollama serve --addr 127.0.0.1:11434
+
+# Terminal 2: GPU instance for inference
+CUDA_VISIBLE_DEVICES=0 ollama serve --addr 127.0.0.1:11435
+
+# Terminal 3: Run AI-RAGJus
+cd /path/to/ai-ragjus
+./jus.sh
+```
+
+**Docker Setup (for Docker users):**
+
+If you run Ollama in Docker instead of native installation:
+
+```bash
+# Terminal 1: CPU-only instance on port 11434
+docker run -d --name ollama-cpu \
+  -p 11434:11434 \
+  -e CUDA_VISIBLE_DEVICES="" \
+  ollama/ollama
+
+# Terminal 2: GPU instance on port 11435
+docker run -d --name ollama-gpu \
+  -p 11435:11434 \
+  -e CUDA_VISIBLE_DEVICES=0 \
+  --gpus all \
+  ollama/ollama
+
+# Terminal 3: Run AI-RAGJus
+cd /path/to/ai-ragjus
+./jus.sh              # or: cd web && ./run.sh for Flask
+```
+
+After running both containers, the AI-RAGJus app will automatically use:
+- Port 11434 (CPU) for embeddings (nomic-embed-text)
+- Port 11435 (GPU) for inference (qwen2.5:1.5b)
+
+**Docker Cleanup:**
+
+When done, stop and remove the containers:
+
+```bash
+docker stop ollama-cpu ollama-gpu
+docker rm ollama-cpu ollama-gpu
+```
+
+**Benefits:**
+- **No GPU/CPU contention**: Embedding model runs on CPU, inference uses GPU
+- **Both models stay loaded**: Eliminates startup overhead on each request
+- **Better throughput**: Parallel processing of embeddings and inference
+- **Stable memory**: Predictable GPU and RAM usage
+
+**Configuration:**
+- Embedding endpoint: `http://localhost:11434` (auto-detected, CPU-only)
+- Inference endpoint: `http://localhost:11435` (auto-detected, GPU-enabled)
+- Both values are auto-configured in `config.conf` and used by CLI and Flask GUI
+
+**Switching Back to Single Instance:**
+If you need to use a single Ollama instance, set `OLLAMA_URL_GPU` to port 11434 in `config.conf`:
+```bash
+OLLAMA_URL="http://localhost:11434"
+OLLAMA_URL_GPU="http://localhost:11434"  # same port for single instance
+```
+Then restart the CLI or Flask server.
+
 ### Flask Web GUI
 
 **Prerequisites:**
 - Python 3.8+
 - Flask, requests (auto-installed via `web/requirements.txt`)
-- Ollama running at `localhost:11434` (same as CLI)
+- **Ollama instances running**:
+  - Port 11434 (CPU-only, embeddings) — see "Dual Ollama Instances" section above
+  - Port 11435 (GPU-enabled, inference) — or use same port for single instance
 - Documents indexed via CLI sync (shares the same `.cache_vetorial/rag_store.db`)
 
 **Start the Web GUI:**
 
 ```bash
-# Terminal 1: Start Ollama (keeps running)
-docker ps   # make sure docker ollama is running
-~/docker-ollama.sh   # start docker ollama 
+# Terminal 1: Start dual Ollama instances (recommended)
+bash web/run_dual_ollama.sh
 
 # Terminal 2: Start Flask web server
 cd /path/to/ai-ragjus/web
