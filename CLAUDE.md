@@ -107,8 +107,8 @@ cd /path/to/ai-ragjus
 
 For optimal performance, run two Ollama instances in parallel to eliminate GPU/CPU contention:
 
-**Instance 1 (port 11434):** CPU-only — embedding model (nomic-embed-text)  
-**Instance 2 (port 11435):** GPU-enabled — inference model (qwen2.5:1.5b or similar)
+**Instance 1 (port 11434):** GPU-enabled — inference model (qwen2.5:1.5b or similar)  
+**Instance 2 (port 11435):** CPU-only — embedding model (nomic-embed-text)
 
 **Quick Start:**
 
@@ -124,11 +124,11 @@ cd /path/to/ai-ragjus
 **Manual Setup (if preferred):**
 
 ```bash
-# Terminal 1: CPU-only instance for embeddings
-CUDA_VISIBLE_DEVICES="" ollama serve --addr 127.0.0.1:11434
+# Terminal 1: GPU instance for inference (default port)
+CUDA_VISIBLE_DEVICES=0 ollama serve --addr 127.0.0.1:11434
 
-# Terminal 2: GPU instance for inference
-CUDA_VISIBLE_DEVICES=0 ollama serve --addr 127.0.0.1:11435
+# Terminal 2: CPU-only instance for embeddings
+CUDA_VISIBLE_DEVICES="" ollama serve --addr 127.0.0.1:11435
 
 # Terminal 3: Run AI-RAGJus
 cd /path/to/ai-ragjus
@@ -140,17 +140,17 @@ cd /path/to/ai-ragjus
 If you run Ollama in Docker instead of native installation:
 
 ```bash
-# Terminal 1: CPU-only instance on port 11434
-docker run -d --name ollama-cpu \
-  -p 11434:11434 \
-  -e CUDA_VISIBLE_DEVICES="" \
-  ollama/ollama
-
-# Terminal 2: GPU instance on port 11435
+# Terminal 1: GPU instance on port 11434 (inference)
 docker run -d --name ollama-gpu \
-  -p 11435:11434 \
+  -p 11434:11434 \
   -e CUDA_VISIBLE_DEVICES=0 \
   --gpus all \
+  ollama/ollama
+
+# Terminal 2: CPU-only instance on port 11435 (embeddings)
+docker run -d --name ollama-cpu \
+  -p 11435:11434 \
+  -e CUDA_VISIBLE_DEVICES="" \
   ollama/ollama
 
 # Terminal 3: Run AI-RAGJus
@@ -159,8 +159,8 @@ cd /path/to/ai-ragjus
 ```
 
 After running both containers, the AI-RAGJus app will automatically use:
-- Port 11434 (CPU) for embeddings (nomic-embed-text)
-- Port 11435 (GPU) for inference (qwen2.5:1.5b)
+- Port 11434 (GPU) for inference (qwen2.5:1.5b)
+- Port 11435 (CPU) for embeddings (nomic-embed-text)
 
 **Docker Cleanup:**
 
@@ -172,21 +172,21 @@ docker rm ollama-cpu ollama-gpu
 ```
 
 **Benefits:**
-- **No GPU/CPU contention**: Embedding model runs on CPU, inference uses GPU
+- **No GPU/CPU contention**: Inference model uses GPU (port 11434), embedding model runs on CPU (port 11435)
 - **Both models stay loaded**: Eliminates startup overhead on each request
 - **Better throughput**: Parallel processing of embeddings and inference
 - **Stable memory**: Predictable GPU and RAM usage
 
 **Configuration:**
-- Embedding endpoint: `http://localhost:11434` (auto-detected, CPU-only)
-- Inference endpoint: `http://localhost:11435` (auto-detected, GPU-enabled)
+- Inference endpoint: `http://localhost:11434` (auto-detected, GPU-enabled) — set via `OLLAMA_URL`
+- Embedding endpoint: `http://localhost:11435` (auto-detected, CPU-only) — set via `OLLAMA_URL_EMBEDDING`
 - Both values are auto-configured in `config.conf` and used by CLI and Flask GUI
 
 **Switching Back to Single Instance:**
-If you need to use a single Ollama instance, set `OLLAMA_URL_GPU` to port 11434 in `config.conf`:
+If you need to use a single Ollama instance, set `OLLAMA_URL_EMBEDDING` to port 11434 in `config.conf`:
 ```bash
 OLLAMA_URL="http://localhost:11434"
-OLLAMA_URL_GPU="http://localhost:11434"  # same port for single instance
+OLLAMA_URL_EMBEDDING="http://localhost:11434"  # same port for single instance
 ```
 Then restart the CLI or Flask server.
 
@@ -196,8 +196,8 @@ Then restart the CLI or Flask server.
 - Python 3.8+
 - Flask, requests (auto-installed via `web/requirements.txt`)
 - **Ollama instances running**:
-  - Port 11434 (CPU-only, embeddings) — see "Dual Ollama Instances" section above
-  - Port 11435 (GPU-enabled, inference) — or use same port for single instance
+  - Port 11434 (GPU-enabled, inference) — see "Dual Ollama Instances" section above
+  - Port 11435 (CPU-only, embeddings) — or use same port for single instance
 - Documents indexed via CLI sync (shares the same `.cache_vetorial/rag_store.db`)
 
 **Start the Web GUI:**
@@ -243,12 +243,13 @@ pip install -r requirements.txt
 
 Edit `config.conf` for:
 - `PASTA_ALVO`: Path to documents folder (default: `./docs`)
+- `OLLAMA_URL`: Inference endpoint (default: `http://localhost:11434` — GPU-enabled)
+- `OLLAMA_URL_EMBEDDING`: Embedding endpoint (default: `http://localhost:11435` — CPU-only)
 - `MODELO_IA`: Inference model (default: `qwen2.5:1.5b`)
 - `MODELO_EMBEDDING`: Embedding model (default: `nomic-embed-text`)
 - `CHUNK_SIZE`: Text chunk size (default: 1000 chars)
 - `CHUNK_OVERLAP`: Overlap between chunks (default: 200 chars)
 - `TEMPERATURA`: Model temperature (default: 0 for deterministic legal responses)
-- `BACKEND`: LLM backend (default: `ollama`; also supports `llamacpp` for llama.cpp at localhost:8000)
 - `CONTEXT_WINDOW`: Ollama `num_ctx` in tokens (default: 16384). Without this, Ollama silently truncates prompts at its own default of 4096 regardless of this file — wired in `src/ai.sh::perguntar_ollama`.
 - `TOKEN_RATIO`: Web GUI's char→token estimation factor for the context window monitor (default: 0.30, ≈3.3 chars/token for Portuguese legal text). CLI-only usage is unaffected.
 
