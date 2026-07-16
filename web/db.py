@@ -321,6 +321,44 @@ def delete_session_memory_item(session_id, memory_id):
         )
 
 
+def count_user_messages(session_id):
+    """Number of user turns in a session - used to label context-compaction
+    checkpoints as "turno N" (backlog items 8+10, see memory.compact_session)."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM messages WHERE session_id = ? AND role = 'user'",
+            (session_id,),
+        ).fetchone()
+    return row["c"] if row else 0
+
+
+# --- Auto-compaction settings (backlog items 8+10) --------------------------
+# Reuses the generic key/value `settings` table instead of a dedicated one:
+# these are GUI-level toggles editable live from /settings, unlike
+# config.conf which requires a restart to take effect.
+
+AUTO_COMPACT_ENABLED_KEY = "AUTO_COMPACT_ENABLED"
+AUTO_COMPACT_THRESHOLD_KEY = "AUTO_COMPACT_THRESHOLD"
+AUTO_COMPACT_DEFAULT_THRESHOLD = 80.0
+
+
+def get_auto_compact_settings():
+    enabled = get_setting(AUTO_COMPACT_ENABLED_KEY, "1") != "0"
+    try:
+        threshold = float(get_setting(AUTO_COMPACT_THRESHOLD_KEY, str(AUTO_COMPACT_DEFAULT_THRESHOLD)))
+    except (TypeError, ValueError):
+        threshold = AUTO_COMPACT_DEFAULT_THRESHOLD
+    return {"enabled": enabled, "threshold": threshold}
+
+
+def set_auto_compact_settings(enabled=None, threshold=None):
+    if enabled is not None:
+        set_setting(AUTO_COMPACT_ENABLED_KEY, "1" if enabled else "0")
+    if threshold is not None:
+        set_setting(AUTO_COMPACT_THRESHOLD_KEY, str(float(threshold)))
+    return get_auto_compact_settings()
+
+
 # --- Global cross-session memory (M4) --------------------------------------
 
 def list_global_memory():

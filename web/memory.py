@@ -21,6 +21,24 @@ SESSION_MEMORY_CHAR_CAP = 1500
 GLOBAL_MEMORY_CHAR_CAP = 800
 AUTO_GLOBAL_MEMORY_CAP = 30
 
+# --- Context compaction (backlog items 8+10) --------------------------------
+CHECKPOINT_PREFIX = "\U0001F4CB Resumo de contexto no turno {turn}: "  # 📋
+COMPACT_TRANSCRIPT_MAX_MESSAGES = 20
+COMPACT_TRANSCRIPT_CHAR_CAP = 4000
+COMPACT_KEEP_RECENT_FACTS = 3  # checkpoint + this many trailing facts survive pruning
+
+_CHECKPOINT_PROMPT = (
+    "Você é um assistente que consolida o estado de uma conversa jurídica para "
+    "reduzir o contexto reenviado ao modelo nos próximos turnos. Com base no "
+    "histórico de mensagens e nos fatos já memorizados abaixo, produza um "
+    "resumo objetivo, em português, em no máximo 5 linhas, cobrindo: fatos "
+    "relevantes estabelecidos, temas discutidos e decisões/conclusões já "
+    "alcançadas. Responda SOMENTE com o resumo, sem introduções nem "
+    "despedidas.\n\n"
+    "Histórico da conversa:\n{transcript}\n\n"
+    "Fatos já memorizados nesta conversa:\n{existing_facts}"
+)
+
 _SESSION_FACT_PROMPT = (
     "Extraia até 3 fatos objetivos e curtos desta interação, um por linha. "
     "Responda SOMENTE com os fatos ou com a palavra NENHUM se não houver "
@@ -159,3 +177,71 @@ def record_turn_memory(session_id, query, answer, config, auto_global=True):
             db.upsert_global_memory(key, value, source="auto")
     except Exception as exc:  # pragma: no cover
         logger.warning("global memory extraction failed: %s", exc)
+
+
+def _build_compact_transcript(session_id):
+    """Recent turns of a session's chat transcript, capped to a char budget,
+    used as the source material for the checkpoint summary."""
+    messages = db.get_messages(session_id)
+    recent = messages[-COMPACT_TRANSCRIPT_MAX_MESSAGES:]
+    lines = []
+    for m in recent:
+        role = "Advogado" if m["role"] == "user" else "Assistente"
+        content = (m.get("content") or "").strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    text = "\n".join(lines)
+    if len(text) > COMPACT_TRANSCRIPT_CHAR_CAP:
+        text = text[-COMPACT_TRANSCRIPT_CHAR_CAP:]
+    return text
+
+
+def generate_checkpoint_summary(session_id, config):
+    """Ask the model to consolidate this session's transcript + memorized
+    facts into one short checkpoint summary. Best-effort - returns "" on any
+    failure so the caller can fall back to a generic placeholder line rather
+    than skip compaction entirely.
+    """
+    transcript = _build_compact_transcript(session_id)
+    if not transcript:
+        return ""
+
+    try:
+        existing = db.get_session_memory(session_id)
+        existing_facts = "\n".join(f["content"] for f in existing) or "(nenhum)"
+    except Exception:  # pragma: no cover - defensive
+        existing_facts = "(nenhum)"
+
+    ollama_url = config.get("OLLAMA_URL", "http://localhost:11434")
+    model = config.get("MODELO_IA", "qwen2.5:1.5b")
+    prompt = _CHECKPOINT_PROMPT.format(transcript=transcript, existing_facts=existing_facts)
+    raw = _call_ollama(prompt, ollama_url, model)
+    return raw.strip()
+
+
+def compact_session(session_id, config, turn_number=None, reason="manual"):
+    """Backlog items 8 (auto-trigger at 80% context usage) and 10 (manual
+    "Compact now" button): consolidate this session's facts/topics/decisions
+    into a single checkpoint message, persist it into session_memory, and
+    truncate the working context by pruning older individual facts that are
+    now folded into the checkpoint - so the NEXT turn's RAG_MEMORY_CONTEXT
+    (see build_memory_context) injects one short summary instead of every
+    fact accumulated so far.
+
+    Returns a dict describing the checkpoint (content/turn/reason), or None
+    if the session has no messages yet (nothing to compact).
+    """
+    if turn_number is None:
+        turn_number = db.count_user_messages(session_id)
+    if turn_number <= 0:
+        return None
+
+    summary = generate_checkpoint_summary(session_id, config)
+    if not summary:
+        summary = "Sem fatos ou decisões relevantes identificados para consolidar até este ponto."
+
+    checkpoint_text = CHECKPOINT_PREFIX.format(turn=turn_number) + summary
+    db.add_session_memory(session_id, checkpoint_text)
+    db.prune_session_memory(session_id, keep=COMPACT_KEEP_RECENT_FACTS)
+
+    return {"content": checkpoint_text, "turn": turn_number, "reason": reason}

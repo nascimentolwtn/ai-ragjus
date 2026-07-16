@@ -1156,6 +1156,70 @@ html, body {
     border-color: var(--error);
 }
 
+/* ===== Auto-compaction settings (backlog item 8, settings page) ===== */
+
+.auto-compact-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+}
+
+.auto-compact-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.auto-compact-threshold-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+
+.auto-compact-threshold-label input {
+    width: 70px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 0.85rem;
+}
+
+.auto-compact-form button {
+    background: var(--accent-dim);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85rem;
+}
+
+.auto-compact-form button:hover {
+    background: var(--accent);
+}
+
+.auto-compact-status {
+    font-size: 0.78rem;
+}
+
+.auto-compact-status.success {
+    color: var(--accent);
+}
+
+.auto-compact-status.error {
+    color: var(--error);
+}
+
 .inline-edit {
     width: 100%;
     background: var(--bg);
@@ -1287,6 +1351,30 @@ html, body {
 @keyframes context-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.75; }
+}
+
+/* ===== Manual "Compact now" button (backlog item 10, chat header) ===== */
+
+.compact-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: var(--radius);
+    padding: 4px 9px;
+    font-size: 0.85rem;
+    line-height: 1;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.compact-btn:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+}
+
+.compact-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* --- File attachments (session-scoped RAG context, backlog item 9) ------ */

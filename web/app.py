@@ -239,16 +239,7 @@ def api_context_usage(session_id):
         return jsonify({"error": "Sessão não encontrada."}), 404
 
     config = load_config()
-    try:
-        context_window = int(config.get("CONTEXT_WINDOW", 16384))
-    except (TypeError, ValueError):
-        context_window = 16384
-    try:
-        token_ratio = float(config.get("TOKEN_RATIO", 0.30))
-    except (TypeError, ValueError):
-        token_ratio = 0.30
-
-    tracker = ContextTracker(context_window=context_window, token_ratio=token_ratio)
+    tracker = ContextTracker.from_config(config)
     prompt_estimate = request.get_json(silent=True) or {}
     usage = tracker.calculate_usage(session_id, prompt_char_estimate=prompt_estimate)
     return jsonify(usage)
@@ -268,6 +259,69 @@ def api_delete_session_memory(session_id, memory_id):
         return jsonify({"error": "Sessão não encontrada."}), 404
     db.delete_session_memory_item(session_id, memory_id)
     return jsonify({"ok": True})
+
+
+@app.route("/api/sessions/<int:session_id>/compact", methods=["POST"])
+def api_compact_session(session_id):
+    """Backlog item 10: manual "Compact now" (🗜️) button in the chat header.
+
+    Reuses the exact same summarization + truncation logic as the item 8
+    auto-trigger (memory.compact_session) - it consolidates this session's
+    facts/topics/decisions into one checkpoint appended to session_memory,
+    then prunes older individual facts so the next turn's injected memory
+    context is smaller. Synchronous (unlike the background memory-extraction
+    thread) since the user is actively waiting on this button.
+    """
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+
+    config = load_config()
+    turn_number = db.count_user_messages(session_id)
+    if turn_number <= 0:
+        return jsonify({"error": "Nada para compactar ainda nesta conversa."}), 400
+
+    try:
+        checkpoint = memory.compact_session(session_id, config, turn_number=turn_number, reason="manual")
+    except Exception as exc:
+        app.logger.exception("manual compact failed for session %s", session_id)
+        return jsonify({"error": f"Falha ao compactar contexto: {exc}"}), 500
+
+    if not checkpoint:
+        return jsonify({"error": "Nada para compactar ainda nesta conversa."}), 400
+
+    return jsonify({
+        "ok": True,
+        "checkpoint": checkpoint,
+        "session_memory_count": len(db.get_session_memory(session_id, limit=50)),
+    })
+
+
+@app.route("/api/settings/auto-compact", methods=["GET"])
+def api_get_auto_compact_settings():
+    """Backlog item 8 config: enable/disable + threshold for auto-compaction,
+    surfaced on the /settings page."""
+    return jsonify(db.get_auto_compact_settings())
+
+
+@app.route("/api/settings/auto-compact", methods=["POST"])
+def api_set_auto_compact_settings():
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get("enabled")
+    threshold = payload.get("threshold")
+
+    if threshold is not None:
+        try:
+            threshold = float(threshold)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Limiar inválido."}), 400
+        if not (10 <= threshold <= 99):
+            return jsonify({"error": "Limiar deve estar entre 10 e 99."}), 400
+
+    db.set_auto_compact_settings(
+        enabled=bool(enabled) if enabled is not None else None,
+        threshold=threshold,
+    )
+    return jsonify({"ok": True, **db.get_auto_compact_settings()})
 
 
 @app.route("/api/sessions/<int:session_id>/attach-file", methods=["POST"])
@@ -376,6 +430,7 @@ def api_chat():
         answer_parts = []
         sources = []
         saw_error = False
+        exact_prompt_tokens = None
 
         try:
             proc = subprocess.Popen(
@@ -416,7 +471,10 @@ def api_chat():
                     yield _sse(event)
                 elif etype == "stats":
                     # Exact prompt_eval_count from Ollama; frontend uses this
-                    # to replace the char-based estimate retroactively.
+                    # to replace the char-based estimate retroactively, and
+                    # it's also the most accurate signal for the item 8
+                    # auto-compact threshold check below.
+                    exact_prompt_tokens = event.get("prompt_eval_count")
                     yield _sse(event)
                 elif etype == "done":
                     yield _sse(event)
@@ -442,6 +500,43 @@ def api_chat():
                 args=(session_id, query, full_answer, config),
                 daemon=True,
             ).start()
+
+        # Backlog item 8: auto-compact once this turn's context usage crosses
+        # the configured threshold (default 80%). Prefer the exact
+        # prompt_eval_count from Ollama's "stats" event; fall back to the
+        # same char-based estimate the context-monitor badge uses if Ollama
+        # never reported one (e.g. the turn errored before generating).
+        # Runs synchronously (unlike the memory thread above) so the
+        # "compact" SSE event below is guaranteed to reach the client before
+        # the stream closes.
+        auto_compact = db.get_auto_compact_settings()
+        if full_answer and auto_compact["enabled"]:
+            tracker = ContextTracker.from_config(config)
+            if exact_prompt_tokens is not None:
+                usage_percent = round(exact_prompt_tokens / tracker.available * 100, 1)
+            else:
+                usage = tracker.calculate_usage(
+                    session_id,
+                    prompt_char_estimate={"retrieved_docs": len(sources) * 1000, "query": len(query)},
+                )
+                usage_percent = usage["usage_percent"]
+
+            if usage_percent >= auto_compact["threshold"]:
+                try:
+                    turn_number = db.count_user_messages(session_id)
+                    checkpoint = memory.compact_session(
+                        session_id, config, turn_number=turn_number, reason="auto"
+                    )
+                    if checkpoint:
+                        yield _sse({
+                            "type": "compact",
+                            "content": checkpoint["content"],
+                            "turn": checkpoint["turn"],
+                            "trigger": "auto",
+                            "usage_percent": usage_percent,
+                        })
+                except Exception as exc:  # pragma: no cover - defensive, never break the stream
+                    app.logger.warning("auto-compact failed for session %s: %s", session_id, exc)
 
     return Response(
         stream_with_context(generate()),
@@ -535,9 +630,16 @@ def _handle_upload_too_large(_exc):
 
 @app.route("/settings")
 def settings_page():
-    """M4: read-only config.conf reference + global memory inspector."""
+    """M4: read-only config.conf reference + global memory inspector.
+    Also surfaces the item 8 auto-compact toggle/threshold (GUI-level
+    setting, live-editable without a restart)."""
     config = load_config()
-    return render_template("settings.html", config=config, memory=db.list_global_memory())
+    return render_template(
+        "settings.html",
+        config=config,
+        memory=db.list_global_memory(),
+        auto_compact=db.get_auto_compact_settings(),
+    )
 
 
 @app.route("/api/memory/global", methods=["GET"])

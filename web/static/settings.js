@@ -139,4 +139,46 @@
     });
 
     loadMemory();
+
+    // --- Auto-compaction settings (backlog item 8) --------------------------
+    const autoCompactForm = document.getElementById("auto-compact-form");
+    const autoCompactEnabledInput = document.getElementById("auto-compact-enabled");
+    const autoCompactThresholdInput = document.getElementById("auto-compact-threshold");
+    const autoCompactStatusEl = document.getElementById("auto-compact-status");
+
+    function setAutoCompactStatus(text, kind) {
+        if (!autoCompactStatusEl) return;
+        autoCompactStatusEl.textContent = text;
+        autoCompactStatusEl.className = "auto-compact-status" + (kind ? " " + kind : "");
+    }
+
+    if (autoCompactForm) {
+        autoCompactForm.addEventListener("submit", function (ev) {
+            ev.preventDefault();
+            fetch("/api/settings/auto-compact", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    enabled: autoCompactEnabledInput.checked,
+                    threshold: Number(autoCompactThresholdInput.value),
+                }),
+            })
+                .then(function (r) {
+                    if (!r.ok) {
+                        return r.json().then(function (data) {
+                            throw new Error(data.error || "Falha ao salvar.");
+                        });
+                    }
+                    return r.json();
+                })
+                .then(function (data) {
+                    autoCompactThresholdInput.value = data.threshold;
+                    setAutoCompactStatus("Salvo.", "success");
+                    setTimeout(function () { setAutoCompactStatus(""); }, 3000);
+                })
+                .catch(function (err) {
+                    setAutoCompactStatus(err.message || "Falha ao salvar.", "error");
+                });
+        });
+    }
 })();

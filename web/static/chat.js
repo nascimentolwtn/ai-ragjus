@@ -722,6 +722,16 @@
                     updateContextUsage({ query: query.length, retrieved_docs: sources.length * 1000 });
                 } else if (event.type === "stats") {
                     updateContextUsageExact(event.prompt_eval_count);
+                } else if (event.type === "compact") {
+                    // Backlog item 8: server auto-compacted this session's
+                    // memory context after crossing the configured threshold.
+                    showToast(
+                        "🗜️ Contexto compactado automaticamente (turno " + event.turn + ").",
+                        "success",
+                        { duration: 6000 }
+                    );
+                    refreshMemoryPanel();
+                    updateContextUsage({ query: query.length });
                 } else if (event.type === "error") {
                     sawError = true;
                     accumulated += (accumulated ? "\n" : "") + "[Erro] " + event.content;
@@ -1419,6 +1429,45 @@
         renderContextUsage(usage, true);
     }
 
+    // --- Manual "Compact now" button (backlog item 10) ----------------------
+    // Triggers the same summarize-and-truncate logic as the item 8
+    // auto-trigger (server-side, see memory.compact_session), on demand.
+    const compactBtn = document.getElementById("compact-btn");
+
+    if (compactBtn) {
+        compactBtn.addEventListener("click", function () {
+            if (!currentSessionId) {
+                showToast("Inicie uma conversa antes de compactar o contexto.", "error");
+                return;
+            }
+            compactBtn.disabled = true;
+            fetch("/api/sessions/" + currentSessionId + "/compact", { method: "POST" })
+                .then(function (r) {
+                    if (!r.ok) {
+                        return r.json().then(function (data) {
+                            throw new Error(data.error || "Falha ao compactar contexto.");
+                        });
+                    }
+                    return r.json();
+                })
+                .then(function (data) {
+                    showToast(
+                        "🗜️ Contexto compactado (turno " + data.checkpoint.turn + ").",
+                        "success",
+                        { duration: 6000 }
+                    );
+                    if (memoryPanel && !memoryPanel.hasAttribute("hidden")) refreshMemoryPanel();
+                    updateContextUsage({});
+                })
+                .catch(function (err) {
+                    showToast(err.message || "Falha ao compactar contexto.", "error");
+                })
+                .finally(function () {
+                    compactBtn.disabled = false;
+                });
+        });
+    }
+
     // --- Session memory disclosure (M3 mini-UI) -----------------------------
     const memoryBtn = document.getElementById("memory-disclosure-btn");
     const memoryPanel = document.getElementById("memory-disclosure-panel");
@@ -1455,6 +1504,20 @@
         });
     }
 
+    // Shared by the 🧠 disclosure toggle above and by post-compaction
+    // refreshes (auto via SSE "compact" event, manual via the 🗜️ button)
+    // so the panel's fact list never goes stale after a checkpoint is added.
+    function refreshMemoryPanel() {
+        if (!currentSessionId) {
+            renderMemoryFacts([]);
+            return;
+        }
+        fetch("/api/sessions/" + currentSessionId + "/memory")
+            .then(function (r) { return r.json(); })
+            .then(function (data) { renderMemoryFacts(data.facts || []); })
+            .catch(function () { renderMemoryFacts([]); });
+    }
+
     if (memoryBtn) {
         memoryBtn.addEventListener("click", function (ev) {
             ev.stopPropagation();
@@ -1463,21 +1526,8 @@
                 memoryPanel.setAttribute("hidden", "");
                 return;
             }
-            if (!currentSessionId) {
-                renderMemoryFacts([]);
-                memoryPanel.removeAttribute("hidden");
-                return;
-            }
-            fetch("/api/sessions/" + currentSessionId + "/memory")
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    renderMemoryFacts(data.facts || []);
-                    memoryPanel.removeAttribute("hidden");
-                })
-                .catch(function () {
-                    renderMemoryFacts([]);
-                    memoryPanel.removeAttribute("hidden");
-                });
+            refreshMemoryPanel();
+            memoryPanel.removeAttribute("hidden");
         });
 
         document.addEventListener("click", function (ev) {

@@ -31,6 +31,30 @@
         </section>
 
         <section class="settings-section">
+            <h2>Compactação Automática de Contexto</h2>
+            <p class="settings-hint">
+                Quando o uso da janela de contexto de um turno atinge o limiar abaixo, o
+                AI-RAGJus consolida os fatos memorizados desta conversa em um único
+                checkpoint (&#128203;) e descarta os fatos antigos já resumidos, reduzindo o
+                contexto reenviado ao modelo nos turnos seguintes. Também pode ser
+                disparada manualmente a qualquer momento pelo botão &#128423; no cabeçalho do chat.
+            </p>
+            <form id="auto-compact-form" class="auto-compact-form">
+                <label class="auto-compact-toggle">
+                    <input type="checkbox" id="auto-compact-enabled" {{ "checked" if auto_compact.enabled else "" }}>
+                    Ativar compactação automática
+                </label>
+                <label class="auto-compact-threshold-label">
+                    Limiar (% da janela de contexto)
+                    <input type="number" id="auto-compact-threshold" min="10" max="99" step="1"
+                           value="{{ auto_compact.threshold | int }}">
+                </label>
+                <button type="submit">Salvar</button>
+                <span class="auto-compact-status" id="auto-compact-status"></span>
+            </form>
+        </section>
+
+        <section class="settings-section">
             <h2>Memória Global</h2>
             <p class="settings-hint">
                 Fatos persistentes sobre você/seu domínio, injetados em toda conversa

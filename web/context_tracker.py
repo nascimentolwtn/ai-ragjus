@@ -24,6 +24,23 @@ class ContextTracker:
         self.output_reserve = output_reserve
         self.available = max(1, context_window - output_reserve)
 
+    @classmethod
+    def from_config(cls, config):
+        """Build a tracker straight from the raw config dict (CONTEXT_WINDOW/
+        TOKEN_RATIO strings from config.conf). Shared by the context-usage
+        endpoint and the auto-compact threshold check in /api/chat (backlog
+        item 8) so both agree on the same available-token math.
+        """
+        try:
+            context_window = int(config.get("CONTEXT_WINDOW", 16384))
+        except (TypeError, ValueError):
+            context_window = 16384
+        try:
+            token_ratio = float(config.get("TOKEN_RATIO", 0.30))
+        except (TypeError, ValueError):
+            token_ratio = 0.30
+        return cls(context_window=context_window, token_ratio=token_ratio)
+
     def estimate_tokens(self, text):
         return max(1, int(len(text) * self.token_ratio))
 
