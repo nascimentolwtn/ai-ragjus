@@ -74,6 +74,49 @@ def test_compact_session_persists_checkpoint_and_prunes(temp_db, monkeypatch):
     assert facts[-1]["content"] == checkpoint["content"]
 
 
+def test_build_compact_transcript_only_uses_target_session(temp_db):
+    """_build_compact_transcript() must source messages from the target
+    session only - a different session's transcript must never bleed into
+    another session's checkpoint summary."""
+    sid_a = temp_db.create_session("A")
+    sid_b = temp_db.create_session("B")
+
+    temp_db.add_message(sid_a, "user", "pergunta exclusiva da sessao A")
+    temp_db.add_message(sid_a, "assistant", "resposta exclusiva da sessao A")
+    temp_db.add_message(sid_b, "user", "pergunta exclusiva da sessao B")
+    temp_db.add_message(sid_b, "assistant", "resposta exclusiva da sessao B")
+
+    transcript_a = memory._build_compact_transcript(sid_a)
+    transcript_b = memory._build_compact_transcript(sid_b)
+
+    assert "sessao A" in transcript_a
+    assert "sessao B" not in transcript_a
+    assert "sessao B" in transcript_b
+    assert "sessao A" not in transcript_b
+
+
+def test_compact_session_does_not_touch_other_sessions_memory(temp_db, monkeypatch):
+    """Compacting one session must never prune or alter another session's
+    session_memory facts."""
+    sid_a = temp_db.create_session("A")
+    sid_b = temp_db.create_session("B")
+
+    temp_db.add_message(sid_a, "user", "pergunta A")
+    temp_db.add_message(sid_a, "assistant", "resposta A")
+    for i in range(6):
+        temp_db.add_session_memory(sid_a, f"fato A {i}")
+    for i in range(6):
+        temp_db.add_session_memory(sid_b, f"fato B {i}")
+
+    monkeypatch.setattr(memory.requests, "post", lambda *a, **k: _FakeResponse("resumo A"))
+
+    memory.compact_session(sid_a, {}, turn_number=1, reason="manual")
+
+    facts_b = temp_db.get_session_memory(sid_b, limit=100)
+    assert len(facts_b) == 6
+    assert all(f["content"].startswith("fato B") for f in facts_b)
+
+
 def test_compact_session_falls_back_when_ollama_unavailable(temp_db, monkeypatch):
     sid = temp_db.create_session("s")
     temp_db.add_message(sid, "user", "pergunta")

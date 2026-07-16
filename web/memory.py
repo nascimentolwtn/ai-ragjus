@@ -105,8 +105,13 @@ def extract_global_facts(query, answer, config):
     return _parse_facts(raw)
 
 
-def _cap_text(lines, char_cap):
-    """Join lines, keeping only as many (oldest-dropped-first) as fit the cap."""
+def cap_text(lines, char_cap):
+    """Join lines, keeping only as many (oldest-dropped-first) as fit the cap.
+
+    Public (not `_`-prefixed): also used by context_tracker.calculate_usage()
+    so its per-session token estimate stays aligned with what
+    build_memory_context() actually injects into the prompt.
+    """
     kept = []
     total = 0
     for line in reversed(lines):
@@ -129,7 +134,7 @@ def build_memory_context(session_id):
         global_entries = db.list_global_memory().get("enabled", [])
         if global_entries:
             lines = [f"- {e['key']}: {e['value']}" for e in global_entries]
-            global_text = _cap_text(lines, GLOBAL_MEMORY_CHAR_CAP)
+            global_text = cap_text(lines, GLOBAL_MEMORY_CHAR_CAP)
             if global_text:
                 blocks.append("Fatos gerais sobre o usuário/domínio:\n" + global_text)
     except Exception as exc:  # pragma: no cover - defensive, memory is best-effort
@@ -139,7 +144,7 @@ def build_memory_context(session_id):
         session_facts = db.get_session_memory(session_id)
         if session_facts:
             lines = [f["content"] for f in session_facts]
-            session_text = _cap_text(lines, SESSION_MEMORY_CHAR_CAP)
+            session_text = cap_text(lines, SESSION_MEMORY_CHAR_CAP)
             if session_text:
                 blocks.append("Fatos desta conversa:\n" + session_text)
     except Exception as exc:  # pragma: no cover

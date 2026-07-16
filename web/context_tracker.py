@@ -9,6 +9,7 @@ own `prompt_eval_count` arrives via the "stats" SSE event and replaces it
 client-side with an exact number.
 """
 import db
+import memory
 
 
 class ContextTracker:
@@ -45,10 +46,16 @@ class ContextTracker:
         return max(1, int(len(text) * self.token_ratio))
 
     def calculate_usage(self, session_id, prompt_char_estimate=None):
-        """Per-turn usage estimate. `prompt_char_estimate` may carry
-        `retrieved_docs` and `query` char counts measured client-side for
-        the turn about to be sent; falls back to typical defaults otherwise.
+        """Per-turn usage estimate, scoped to a single session (`session_id`
+        is required and every underlying lookup below is filtered by it,
+        except global_memory which is intentionally cross-session - see
+        below). `prompt_char_estimate` may carry `retrieved_docs` and
+        `query` char counts measured client-side for the turn about to be
+        sent; falls back to typical defaults otherwise.
         """
+        if session_id is None:
+            raise ValueError("calculate_usage() requires a session_id")
+
         estimate = prompt_char_estimate or {}
 
         # System prompt template + acervo metadata (file list is unbounded
@@ -61,11 +68,24 @@ class ContextTracker:
         query_chars = estimate.get("query", 100)
         query_tokens = self.estimate_tokens("x" * query_chars)
 
+        # Both blocks below mirror memory.build_memory_context()'s formatting
+        # AND char caps exactly, so the estimate reflects what will actually
+        # be injected into THIS session's next prompt - not the raw,
+        # unbounded fact store. Session facts are already scoped to
+        # `session_id` by db.get_session_memory(); global facts are
+        # intentionally cross-session (M4 design: they're re-injected into
+        # every session's prompt), but must still be capped here the same
+        # way they're capped at injection time, otherwise a large shared
+        # global-memory store (accumulated across many other sessions over
+        # time) inflates every individual session's usage_percent and can
+        # trip the auto-compact threshold on a session that never came
+        # close to it.
         session_tokens = 0
         try:
             session_facts = db.get_session_memory(session_id)
             if session_facts:
-                mem_text = "\n".join(f["content"] for f in session_facts)
+                lines = [f["content"] for f in session_facts]
+                mem_text = memory.cap_text(lines, memory.SESSION_MEMORY_CHAR_CAP)
                 session_tokens = self.estimate_tokens(mem_text)
         except (AttributeError, KeyError):
             pass  # M3 table not present / session has no facts yet
@@ -75,7 +95,8 @@ class ContextTracker:
             global_result = db.list_global_memory()
             global_facts = global_result.get("enabled", [])
             if global_facts:
-                mem_text = "\n".join(f"{f['key']}: {f['value']}" for f in global_facts)
+                lines = [f"- {f['key']}: {f['value']}" for f in global_facts]
+                mem_text = memory.cap_text(lines, memory.GLOBAL_MEMORY_CHAR_CAP)
                 global_tokens = self.estimate_tokens(mem_text)
         except (AttributeError, KeyError):
             pass  # M4 table not present

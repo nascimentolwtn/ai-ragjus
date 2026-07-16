@@ -50,7 +50,7 @@ def test_extract_facts_swallows_timeout(monkeypatch):
 
 def test_cap_text_keeps_most_recent_within_budget():
     lines = ["a" * 100 for _ in range(20)]
-    result = memory._cap_text(lines, char_cap=250)
+    result = memory.cap_text(lines, char_cap=250)
     assert len(result) <= 250 + 100  # allows the single overflow line that made it fit
     # newest lines are the ones kept (last of the input list)
     assert result.endswith(lines[-1])
