@@ -26,6 +26,7 @@ docker run -d --name ollama-gpu \
 echo "[*] Starting CPU-only instance on port 11435..."
 docker run -d --name ollama-cpu \
   --network host \
+  --gpus none \
   -v /usr/share/ollama/.ollama/models:/root/.ollama/models \
   -v ~/models-llm:/home/root/models-llm \
   -e CUDA_VISIBLE_DEVICES="" \
