@@ -922,11 +922,87 @@
         }
         attachmentsBarEl.hidden = false;
         attachments.forEach(function (att) {
-            const pill = document.createElement("span");
-            pill.className = "attachment-pill";
-            pill.title = att.chunks + " trecho(s) — " + formatBytes(att.chars) + " (apenas nesta conversa)";
-            pill.textContent = "📎 " + att.file_name;
-            attachmentsBarEl.appendChild(pill);
+            attachmentsBarEl.appendChild(buildAttachmentRow(att));
+        });
+    }
+
+    function buildAttachmentRow(att) {
+        const row = document.createElement("div");
+        row.className = "attachment-pill";
+
+        const nameEl = document.createElement("span");
+        nameEl.className = "attachment-pill-name";
+        nameEl.title = att.chunks_added + " trecho(s) — " + formatBytes(att.size_bytes) + " (apenas nesta conversa)";
+        nameEl.textContent = "📎 " + att.file_name + " (" + formatBytes(att.size_bytes) + ")";
+        row.appendChild(nameEl);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "attachment-remove-btn";
+        removeBtn.title = "Remover anexo desta conversa";
+        removeBtn.textContent = "×";
+        removeBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            confirmRemoveAttachment(row, att);
+        });
+        row.appendChild(removeBtn);
+
+        return row;
+    }
+
+    function confirmRemoveAttachment(row, att) {
+        if (row.querySelector(".attachment-confirm-delete")) return;
+
+        const confirmBar = document.createElement("div");
+        confirmBar.className = "attachment-confirm-delete";
+
+        const label = document.createElement("span");
+        label.textContent = "Remover da conversa?";
+
+        const yesBtn = document.createElement("button");
+        yesBtn.type = "button";
+        yesBtn.textContent = "Sim";
+        yesBtn.className = "confirm-yes";
+
+        const noBtn = document.createElement("button");
+        noBtn.type = "button";
+        noBtn.textContent = "Cancelar";
+        noBtn.className = "confirm-no";
+
+        confirmBar.appendChild(label);
+        confirmBar.appendChild(yesBtn);
+        confirmBar.appendChild(noBtn);
+        row.appendChild(confirmBar);
+
+        noBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            confirmBar.remove();
+        });
+
+        yesBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            if (!currentSessionId) {
+                confirmBar.remove();
+                return;
+            }
+            fetch("/api/sessions/" + currentSessionId + "/attachments/" + att.id, { method: "DELETE" })
+                .then(function (r) {
+                    if (!r.ok) {
+                        return r.json().then(function (data) {
+                            throw new Error(data.error || "Falha ao remover anexo.");
+                        });
+                    }
+                    return r.json();
+                })
+                .then(function () {
+                    row.remove();
+                    if (!attachmentsBarEl.children.length) attachmentsBarEl.hidden = true;
+                    showToast("Anexo removido: " + att.file_name, "success");
+                })
+                .catch(function (err) {
+                    confirmBar.remove();
+                    showToast(err.message || "Falha ao remover anexo.", "error");
+                });
         });
     }
 

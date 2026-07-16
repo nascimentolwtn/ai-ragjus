@@ -1312,25 +1312,98 @@ html, body {
 
 .attachments-bar {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 0 20px 10px;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 20px 10px;
 }
 
 .attachment-pill {
-    display: inline-flex;
+    position: relative;
+    display: flex;
     align-items: center;
-    gap: 4px;
+    justify-content: space-between;
+    gap: 8px;
     background: var(--panel);
     border: 1px solid var(--border);
     color: var(--text-dim);
-    border-radius: 999px;
-    padding: 3px 10px;
-    font-size: 0.72rem;
-    max-width: 220px;
+    border-radius: 6px;
+    padding: 4px 6px 4px 10px;
+    font-size: 0.75rem;
+    max-width: 420px;
+}
+
+.attachment-pill-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.attachment-remove-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.attachment-remove-btn:hover {
+    color: #fff;
+    background: var(--error);
+}
+
+.attachment-confirm-delete {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+    background: var(--panel);
+    border-radius: 6px;
+    border: 1px solid var(--error);
+    font-size: 0.75rem;
+    z-index: 1;
+}
+
+.attachment-confirm-delete span {
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.attachment-confirm-delete button {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-family: inherit;
+    font-size: 0.72rem;
+    cursor: pointer;
+    flex: none;
+}
+
+.attachment-confirm-delete .confirm-yes {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.attachment-confirm-delete .confirm-yes:hover {
+    background: var(--error);
+    color: #fff;
+}
+
+.attachment-confirm-delete .confirm-no:hover {
+    border-color: var(--accent-dim);
+    color: var(--accent);
 }
 
 .drop-overlay {

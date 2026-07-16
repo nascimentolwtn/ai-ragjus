@@ -105,6 +105,7 @@ def attach_file(session_id, file_storage, config):
                     text=event.get("text", ""),
                     embedding=event.get("embedding"),
                     file_name=filename,
+                    size_bytes=size_bytes,
                 )
                 chunks_added += 1
             elif etype == "error":

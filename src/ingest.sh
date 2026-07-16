@@ -41,18 +41,18 @@ extrair_texto_limpo() {
 # Divide o texto em blocos menores (chunks) usando JQ
 fatiar_texto() {
     local texto="$1"
-    
+
     # Executa o chunking em JQ de forma ultra rápida
-    jq -n \
-        --arg text "$texto" \
+    echo "$texto" | jq -R -s \
         --argjson size "$CHUNK_SIZE" \
         --argjson overlap "$CHUNK_OVERLAP" \
         '
-        [
-          range(0; $text | length; $size - $overlap) as $start
-          | $text[$start : $start + $size]
-          | select(length > 0)
-        ]
+        . as $text
+        | [
+            range(0; $text | length; $size - $overlap) as $start
+            | $text[$start : $start + $size]
+            | select(length > 0)
+          ]
         '
 }
 

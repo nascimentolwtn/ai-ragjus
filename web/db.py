@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS session_embeddings (
     text        TEXT NOT NULL,
     embedding   TEXT NOT NULL,        -- JSON array (same format as rag_store.db)
     file_name   TEXT NOT NULL,
+    size_bytes  INTEGER NOT NULL DEFAULT 0,  -- original file size, repeated per chunk (for the UI file list)
     created_at  TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_session_embeddings_session ON session_embeddings(session_id);
@@ -113,6 +114,18 @@ def init_db():
     """Create tables if they don't exist yet. Safe to call on every startup."""
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn):
+    """Lightweight ALTER TABLE migrations for columns added after a DB already
+    existed on disk (executescript's CREATE TABLE IF NOT EXISTS won't add
+    columns to a table that's already there)."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(session_embeddings)")}
+    if "size_bytes" not in cols:
+        conn.execute(
+            "ALTER TABLE session_embeddings ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def create_session(title):
@@ -398,23 +411,54 @@ def evict_oldest_auto_global_memory():
 
 # --- Session-scoped file attachments (item 9) ------------------------------
 
-def add_session_embedding(session_id, chunk_id, text, embedding, file_name):
+def add_session_embedding(session_id, chunk_id, text, embedding, file_name, size_bytes=0):
     embedding_json = json.dumps(embedding, ensure_ascii=False)
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO session_embeddings "
-            "(session_id, chunk_id, text, embedding, file_name) VALUES (?, ?, ?, ?, ?)",
-            (session_id, chunk_id, text, embedding_json, file_name),
+            "(session_id, chunk_id, text, embedding, file_name, size_bytes) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, chunk_id, text, embedding_json, file_name, size_bytes),
         )
 
 
 def list_session_attachments(session_id):
-    """Distinct files attached to a session, with chunk/char counts (for UI)."""
+    """Files attached to a session, one row per file (for the UI file list).
+
+    session_embeddings stores one row per CHUNK, not per file, so `id` here
+    is the id of that file's first chunk row. It's returned as the file's
+    "attachment id" - delete_session_attachment() below resolves it back to
+    a file_name and removes every chunk that shares it.
+    """
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT file_name, COUNT(*) AS chunks, SUM(LENGTH(text)) AS chars "
+            "SELECT MIN(id) AS id, file_name, COUNT(*) AS chunks_added, "
+            "MAX(size_bytes) AS size_bytes "
             "FROM session_embeddings WHERE session_id = ? "
             "GROUP BY file_name ORDER BY MIN(created_at) ASC",
             (session_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def delete_session_attachment(session_id, attachment_id):
+    """Remove every chunk of the file represented by `attachment_id` from
+    `session_id`'s RAG context, so it stops being used in future queries.
+
+    Returns "not_found" if no chunk with that id exists at all, "forbidden"
+    if it exists but belongs to a different session, or the deleted
+    file_name on success.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT session_id, file_name FROM session_embeddings WHERE id = ?",
+            (attachment_id,),
+        ).fetchone()
+        if row is None:
+            return "not_found"
+        if row["session_id"] != session_id:
+            return "forbidden"
+        conn.execute(
+            "DELETE FROM session_embeddings WHERE session_id = ? AND file_name = ?",
+            (session_id, row["file_name"]),
+        )
+        return row["file_name"]

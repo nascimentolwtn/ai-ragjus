@@ -307,6 +307,24 @@ def api_list_attachments(session_id):
     return jsonify({"attachments": db.list_session_attachments(session_id)})
 
 
+@app.route("/api/sessions/<int:session_id>/attachments/<int:attachment_id>", methods=["DELETE"])
+def api_delete_attachment(session_id, attachment_id):
+    """Remove one attached file (all its chunks) from this session's RAG
+    context. Takes effect immediately - the next chat turn's rag_query.sh
+    call re-reads session_embeddings, so a deleted file is never merged in
+    again (though a chunk it already contributed may still be quoted in
+    older messages already rendered in the transcript)."""
+    if not db.get_session(session_id):
+        return jsonify({"error": "Sessão não encontrada."}), 404
+
+    result = db.delete_session_attachment(session_id, attachment_id)
+    if result == "not_found":
+        return jsonify({"error": "Anexo não encontrado."}), 404
+    if result == "forbidden":
+        return jsonify({"error": "Anexo pertence a outra sessão."}), 403
+    return jsonify({"status": "ok", "file_name": result})
+
+
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
     payload = request.get_json(silent=True) or {}
