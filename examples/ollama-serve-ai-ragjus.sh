@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Dual Ollama instances for AI-RAGJus (native)
-# CPU instance on 11434 (embeddings)
-# GPU instance on 11435 (inference)
+# GPU instance on 11434 (inference)
+# CPU instance on 11435 (embeddings)
 
 set -e
 
@@ -26,13 +26,13 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-echo "[*] Starting CPU-only instance on port 11434..."
-CUDA_VISIBLE_DEVICES="" ollama serve --addr 127.0.0.1:11434 >> "$CPU_LOG" 2>&1 &
-CPU_PID=$!
-
-echo "[*] Starting GPU instance on port 11435..."
-CUDA_VISIBLE_DEVICES=0 ollama serve --addr 127.0.0.1:11435 >> "$GPU_LOG" 2>&1 &
+echo "[*] Starting GPU instance on port 11434..."
+CUDA_VISIBLE_DEVICES=0 ollama serve --addr 127.0.0.1:11434 >> "$GPU_LOG" 2>&1 &
 GPU_PID=$!
+
+echo "[*] Starting CPU-only instance on port 11435..."
+CUDA_VISIBLE_DEVICES="" ollama serve --addr 127.0.0.1:11435 >> "$CPU_LOG" 2>&1 &
+CPU_PID=$!
 
 sleep 2
 
@@ -46,8 +46,8 @@ show_logs_with_prefix() {
   tail -F "$logfile" 2>/dev/null | sed "s/^/$prefix /" &
 }
 
-show_logs_with_prefix "$CPU_LOG" "[CPU-11434]"
-show_logs_with_prefix "$GPU_LOG" "[GPU-11435]"
+show_logs_with_prefix "$GPU_LOG" "[GPU-11434]"
+show_logs_with_prefix "$CPU_LOG" "[CPU-11435]"
 
 # Keep script running until interrupted
 wait $CPU_PID $GPU_PID 2>/dev/null || true

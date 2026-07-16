@@ -23,10 +23,10 @@ fi
 # Gera o vetor de embedding para um bloco de texto (com auto-recuperação de modelo ausente)
 gerar_embedding() {
     local texto="$1"
-    
+
     # Valida parâmetros globais carregados
-    if [ -z "$OLLAMA_URL" ] || [ -z "$MODELO_EMBEDDING" ]; then
-        echo "Erro: OLLAMA_URL ou MODELO_EMBEDDING não estão definidos." >&2
+    if [ -z "$OLLAMA_URL_EMBEDDING" ] || [ -z "$MODELO_EMBEDDING" ]; then
+        echo "Erro: OLLAMA_URL_EMBEDDING ou MODELO_EMBEDDING não estão definidos." >&2
         return 1
     fi
 
@@ -36,7 +36,7 @@ gerar_embedding() {
 
     # Faz a requisição à API de embeddings do Ollama
     local response
-    response=$(curl -s -X POST "$OLLAMA_URL/api/embeddings" \
+    response=$(curl -s -X POST "$OLLAMA_URL_EMBEDDING/api/embeddings" \
         -H "Content-Type: application/json" \
         -d "$json_payload" 2>/dev/null || echo "")
 
@@ -85,8 +85,8 @@ gerar_embedding() {
 perguntar_ollama() {
     local prompt="$1"
 
-    if [ -z "$OLLAMA_URL_GPU" ] || [ -z "$MODELO_IA" ]; then
-        echo "Erro: OLLAMA_URL_GPU ou MODELO_IA não estão definidos." >&2
+    if [ -z "$OLLAMA_URL" ] || [ -z "$MODELO_IA" ]; then
+        echo "Erro: OLLAMA_URL ou MODELO_IA não estão definidos." >&2
         return 1
     fi
 
@@ -125,7 +125,7 @@ perguntar_ollama() {
                         read -p "Deseja realizar o download dele automaticamente agora? (s/n): " baixar_ia < /dev/tty
                         if [ "$baixar_ia" = "s" ] || [ "$baixar_ia" = "S" ]; then
                             echo -e "${BLUE}Baixando o modelo '$MODELO_IA'... Isso pode levar alguns minutos.${NC}" >&2
-                            curl -d "{\"name\": \"$MODELO_IA\"}" "$OLLAMA_URL_GPU/api/pull" >&2
+                            curl -d "{\"name\": \"$MODELO_IA\"}" "$OLLAMA_URL/api/pull" >&2
                             echo -e "\n${GREEN}[OK] Modelo instalado! Reprocessando sua pergunta...${NC}\n" >&2
                             should_retry=true
                             break
@@ -163,7 +163,7 @@ perguntar_ollama() {
                     echo "$line" | jq -c '{type:"stats", prompt_eval_count: (.prompt_eval_count // null), eval_count: (.eval_count // null)}' 2>/dev/null || true
                 fi
             fi
-        done < <(curl -s -N -X POST "$OLLAMA_URL_GPU/api/generate" \
+        done < <(curl -s -N -X POST "$OLLAMA_URL/api/generate" \
             -H "Content-Type: application/json" \
             -d "$json_payload" 2>"$tmp_err" || echo "")
 
