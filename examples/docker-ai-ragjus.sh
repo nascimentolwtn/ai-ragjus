@@ -6,9 +6,30 @@
 
 set -e
 
-echo "[*] Stopping and removing old containers..."
-docker stop ollama-cpu ollama-gpu 2>/dev/null || true
-docker rm ollama-cpu ollama-gpu 2>/dev/null || true
+LOG_DIR="${HOME}/.ollama/logs"
+mkdir -p "$LOG_DIR"
+
+CPU_LOG="$LOG_DIR/ollama-cpu.log"
+GPU_LOG="$LOG_DIR/ollama-gpu.log"
+
+# Clear old logs
+> "$CPU_LOG"
+> "$GPU_LOG"
+
+stop_instances() {
+  echo "[*] Stopping and removing old containers..."
+  docker stop ollama-cpu ollama-gpu 2>/dev/null || true
+  docker rm ollama-cpu ollama-gpu 2>/dev/null || true
+}
+
+# If "stop" argument is passed, stop instances and exit
+if [[ "$1" == "stop" ]]; then
+  stop_instances
+  exit 0
+fi
+
+# Proceed with normal startup flow
+stop_instances
 
 echo "[*] Starting GPU instance on port 11434..."
 docker run -d --name ollama-gpu \
@@ -40,18 +61,19 @@ sleep 2
 echo "[*] Both instances started. Monitoring logs (Ctrl+C to stop)..."
 echo ""
 
-# Function to display logs with prefix
+# Function to display logs with prefix and save to file
 show_logs() {
   local container=$1
   local prefix=$2
-  docker logs -f "$container" 2>&1 | sed "s/^/$prefix /"
+  local logfile=$3
+  docker logs -f "$container" 2>&1 | sed "s/^/$prefix /" | tee "$logfile"
 }
 
 # Start both log streams in the background
-show_logs ollama-gpu "[GPU-11434]" &
+show_logs ollama-gpu "[GPU-11434]" "$GPU_LOG" &
 GPU_PID=$!
 
-show_logs ollama-cpu "[CPU-11435]" &
+show_logs ollama-cpu "[CPU-11435]" "$CPU_LOG" &
 CPU_PID=$!
 
 # Trap Ctrl+C to stop both background jobs
