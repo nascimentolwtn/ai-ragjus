@@ -18,20 +18,20 @@ docker run -d --name ollama-gpu \
   -v ~/models-llm:/home/root/models-llm \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e OLLAMA_HOST=127.0.0.1:11434 \
-  -e OLLAMA_KEEP_ALIVE=4h \
-  -e OLLAMA_MAX_LOADED_MODELS=2 \
+  -e OLLAMA_KEEP_ALIVE=24h \
+  -e OLLAMA_MAX_LOADED_MODELS=1 \
   -e OLLAMA_FLASH_ATTENTION=1 \
   ollama/ollama:latest serve
 
 echo "[*] Starting CPU-only instance on port 11435..."
 docker run -d --name ollama-cpu \
   --network host \
-  --gpus none \
   -v /usr/share/ollama/.ollama/models:/root/.ollama/models \
   -v ~/models-llm:/home/root/models-llm \
   -e CUDA_VISIBLE_DEVICES="" \
   -e OLLAMA_HOST=127.0.0.1:11435 \
-  -e OLLAMA_KEEP_ALIVE=4h \
+  -e OLLAMA_KEEP_ALIVE=24h \
+  -e OLLAMA_MAX_LOADED_MODELS=1 \
   -e OLLAMA_FLASH_ATTENTION=0 \
   ollama/ollama:latest serve
 

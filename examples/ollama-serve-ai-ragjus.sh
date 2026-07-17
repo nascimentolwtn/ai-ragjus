@@ -27,11 +27,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "[*] Starting GPU instance on port 11434..."
-CUDA_VISIBLE_DEVICES=0 ollama serve --addr 127.0.0.1:11434 >> "$GPU_LOG" 2>&1 &
+CUDA_VISIBLE_DEVICES=0 OLLAMA_KEEP_ALIVE=24h ollama serve --addr 127.0.0.1:11434 >> "$GPU_LOG" 2>&1 &
 GPU_PID=$!
 
 echo "[*] Starting CPU-only instance on port 11435..."
-CUDA_VISIBLE_DEVICES="" ollama serve --addr 127.0.0.1:11435 >> "$CPU_LOG" 2>&1 &
+CUDA_VISIBLE_DEVICES="" OLLAMA_KEEP_ALIVE=24h ollama serve --addr 127.0.0.1:11435 >> "$CPU_LOG" 2>&1 &
 CPU_PID=$!
 
 sleep 2
