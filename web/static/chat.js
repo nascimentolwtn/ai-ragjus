@@ -192,6 +192,53 @@
         return html;
     }
 
+    // --- <think> block rendering -------------------------------------------
+    // Reasoning models (deepseek-r1, qwq, ...) wrap their chain-of-thought in
+    // <think>...</think> before the final answer. Rendered as a collapsible,
+    // muted block so it doesn't compete visually with the actual answer, but
+    // stays available for legal-review transparency. Streaming-safe: a block
+    // whose closing tag hasn't arrived yet is shown open and marked "em
+    // andamento" rather than waiting for it.
+    function renderAssistantContent(raw) {
+        if (!raw) return "";
+
+        const OPEN_TAG = "<think>";
+        const CLOSE_TAG = "</think>";
+
+        let html = "";
+        let rest = raw;
+
+        for (;;) {
+            const openIdx = rest.indexOf(OPEN_TAG);
+            if (openIdx === -1) break;
+
+            html += renderMarkdown(rest.slice(0, openIdx));
+            const afterOpen = rest.slice(openIdx + OPEN_TAG.length);
+            const closeIdx = afterOpen.indexOf(CLOSE_TAG);
+
+            let thinkText, inProgress;
+            if (closeIdx === -1) {
+                thinkText = afterOpen;
+                rest = "";
+                inProgress = true;
+            } else {
+                thinkText = afterOpen.slice(0, closeIdx);
+                rest = afterOpen.slice(closeIdx + CLOSE_TAG.length);
+                inProgress = false;
+            }
+
+            html += "<details class=\"think-block\"" + (inProgress ? " open" : "") + ">" +
+                "<summary>💭 " + (inProgress ? "Pensando…" : "Raciocínio") + "</summary>" +
+                "<div class=\"think-content\">" + escapeHtml(thinkText).replace(/\n/g, "<br>") + "</div>" +
+                "</details>";
+
+            if (inProgress) break;
+        }
+
+        html += renderMarkdown(rest);
+        return html;
+    }
+
     // --- Copy-to-clipboard -------------------------------------------------
     function fallbackCopy(text) {
         const ta = document.createElement("textarea");
@@ -274,7 +321,7 @@
         contentEl.dataset.raw = content || "";
         if (role === "assistant") {
             contentEl.classList.add("markdown-content");
-            contentEl.innerHTML = renderMarkdown(content || "");
+            contentEl.innerHTML = renderAssistantContent(content || "");
             rightGroup.appendChild(createCopyButton(contentEl, "resposta"));
         } else {
             contentEl.textContent = content || "";
@@ -714,7 +761,7 @@
                 } else if (event.type === "token") {
                     accumulated += event.content || "";
                     assistantContentEl.dataset.raw = accumulated;
-                    assistantContentEl.innerHTML = renderMarkdown(accumulated);
+                    assistantContentEl.innerHTML = renderAssistantContent(accumulated);
                     scrollToBottom();
                 } else if (event.type === "sources") {
                     sources = event.content || [];
@@ -736,7 +783,7 @@
                     sawError = true;
                     accumulated += (accumulated ? "\n" : "") + "[Erro] " + event.content;
                     assistantContentEl.dataset.raw = accumulated;
-                    assistantContentEl.innerHTML = renderMarkdown(accumulated);
+                    assistantContentEl.innerHTML = renderAssistantContent(accumulated);
                     assistantContentEl.closest(".message").classList.add("error");
                 }
                 // "done" is a no-op; the loop ends when the stream closes.
@@ -745,7 +792,7 @@
             sawError = true;
             accumulated += (accumulated ? "\n" : "") + "[Erro de conexão] " + err.message;
             assistantContentEl.dataset.raw = accumulated;
-            assistantContentEl.innerHTML = renderMarkdown(accumulated);
+            assistantContentEl.innerHTML = renderAssistantContent(accumulated);
             assistantContentEl.closest(".message").classList.add("error");
         }
 

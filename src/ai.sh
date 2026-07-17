@@ -11,14 +11,21 @@ if [ "$NON_INTERACTIVE" = "1" ]; then
     GREEN=''
     YELLOW=''
     BLUE=''
+    GRAY=''
     NC=''
 else
     RED='\033[0;31m'
     GREEN='\033[0;32m'
     YELLOW='\033[1;33m'
     BLUE='\033[0;34m'
+    GRAY='\033[0;90m'
     NC='\033[0m'
 fi
+
+# Tags usadas pelos modelos de raciocínio (deepseek-r1, qwq, etc.) para
+# delimitar o bloco de "pensamento" antes da resposta final.
+readonly TAG_PENSAMENTO_ABRE='<think>'
+readonly TAG_PENSAMENTO_FECHA='</think>'
 
 # Gera o vetor de embedding para um bloco de texto (com auto-recuperação de modelo ausente)
 gerar_embedding() {
@@ -81,6 +88,58 @@ gerar_embedding() {
     echo "$response" | jq -c '.embedding'
 }
 
+# Imprime o texto do stream do CLI, tingindo de cinza o conteúdo entre
+# <think>...</think> (raciocínio de modelos como deepseek-r1/qwq) e mantendo
+# o verde padrão para o restante da resposta. Só é chamada no modo interativo
+# (NON_INTERACTIVE=1 já recebe as tags cruas no JSON e deixa a renderização
+# a cargo do frontend web, que faz o mesmo tipo de parsing em chat.js).
+#
+# Os tokens chegam em pedaços arbitrários (não alinhados com as tags), então
+# o texto é acumulado em $STREAM_BUFFER e só é impresso quando temos certeza
+# de que não é o prefixo de uma tag ainda incompleta.
+STREAM_PENSANDO=false
+STREAM_BUFFER=""
+
+_imprimir_stream_com_pensamento() {
+    STREAM_BUFFER+="$1"
+
+    while true; do
+        local tag cor
+        if [ "$STREAM_PENSANDO" = false ]; then
+            tag="$TAG_PENSAMENTO_ABRE"
+            cor="$GREEN"
+        else
+            tag="$TAG_PENSAMENTO_FECHA"
+            cor="$GRAY"
+        fi
+
+        if [[ "$STREAM_BUFFER" == *"$tag"* ]]; then
+            local antes="${STREAM_BUFFER%%"$tag"*}"
+            [ -n "$antes" ] && echo -ne "${cor}${antes}${NC}"
+            STREAM_BUFFER="${STREAM_BUFFER#*"$tag"}"
+            [ "$STREAM_PENSANDO" = false ] && STREAM_PENSANDO=true || STREAM_PENSANDO=false
+            continue
+        fi
+
+        # Sem tag completa no buffer: imprime tudo, exceto um possível prefixo
+        # parcial da tag no final (para não cortar "<thi" no meio da tela).
+        local manter=0 tam_max=${#STREAM_BUFFER} l
+        [ "$tam_max" -gt ${#tag} ] && tam_max=${#tag}
+        for (( l=tam_max; l>=1; l-- )); do
+            if [ "${STREAM_BUFFER: -$l}" = "${tag:0:$l}" ]; then
+                manter=$l
+                break
+            fi
+        done
+
+        local seguro_len=$(( ${#STREAM_BUFFER} - manter ))
+        [ "$seguro_len" -gt 0 ] && echo -ne "${cor}${STREAM_BUFFER:0:$seguro_len}${NC}"
+        STREAM_BUFFER="${STREAM_BUFFER: -$manter}"
+        [ "$manter" -eq 0 ] && STREAM_BUFFER=""
+        break
+    done
+}
+
 # Envia o prompt montado para o Ollama em tempo real (com loop de retry / auto-recuperação)
 perguntar_ollama() {
     local prompt="$1"
@@ -97,6 +156,10 @@ perguntar_ollama() {
 
     local json_payload
     json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$prompt" --argjson temp "$TEMPERATURA" --argjson ctx "$ctx_window" '{"model": $model, "prompt": $prompt, "stream": true, "options": {"temperature": $temp, "num_ctx": $ctx}}')
+
+    # Reseta o estado do buffer de <think> a cada nova pergunta.
+    STREAM_PENSANDO=false
+    STREAM_BUFFER=""
 
     while true; do
         local response_started=false
@@ -148,7 +211,7 @@ perguntar_ollama() {
                     if [ "$NON_INTERACTIVE" = "1" ]; then
                         jq -cn --arg t "$token" '{type:"token", content:$t}'
                     else
-                        echo -ne "${GREEN}${token}${NC}"
+                        _imprimir_stream_com_pensamento "$token"
                     fi
                     response_started=true
                 fi
@@ -171,7 +234,18 @@ perguntar_ollama() {
 
         # Se agendou retry, roda o loop principal novamente
         if [ "$should_retry" = true ]; then
+            STREAM_PENSANDO=false
+            STREAM_BUFFER=""
             continue
+        fi
+
+        # Escoa qualquer texto retido no buffer (ex: tag parcial nunca
+        # completada porque o stream terminou no meio dela).
+        if [ "$NON_INTERACTIVE" != "1" ] && [ -n "$STREAM_BUFFER" ]; then
+            local cor_final="$GREEN"
+            [ "$STREAM_PENSANDO" = true ] && cor_final="$GRAY"
+            echo -ne "${cor_final}${STREAM_BUFFER}${NC}"
+            STREAM_BUFFER=""
         fi
 
         # Se nada foi impresso, diagnostica a falha

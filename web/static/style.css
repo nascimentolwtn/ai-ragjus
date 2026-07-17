@@ -652,6 +652,45 @@ html, body {
     color: var(--accent);
 }
 
+/* ===== <think> reasoning block (collapsible, muted) ===== */
+
+.think-block {
+    margin: 0.4em 0 0.8em 0;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: var(--bg-alt);
+}
+
+.think-block summary {
+    cursor: pointer;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    user-select: none;
+    list-style: none;
+}
+
+.think-block summary::-webkit-details-marker {
+    display: none;
+}
+
+.think-block summary::before {
+    content: "▶ ";
+    font-size: 0.65rem;
+}
+
+.think-block[open] summary::before {
+    content: "▼ ";
+}
+
+.think-block .think-content {
+    padding: 0 12px 10px 12px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    white-space: normal;
+}
+
 .sources {
     margin-top: 10px;
     display: flex;
