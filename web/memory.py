@@ -63,11 +63,31 @@ _GLOBAL_FACT_PROMPT = (
 _PLACEHOLDER_TOKENS = {"chave", "valor", "key", "value", "chave_curta", "exemplo"}
 
 
-def _call_ollama(prompt, ollama_url, model):
+def _num_ctx(config):
+    """Match the num_ctx the main RAG path sends (src/ai.sh::perguntar_ollama).
+
+    Ollama reloads a resident model whenever a request's num_ctx differs from
+    what it was loaded with. Omitting it here made these background calls hit
+    the GPU inference model at Ollama's 4096 default, forcing a reload on every
+    turn (and another reload back to 16384 on the next real question). Keeping
+    the value identical avoids the churn.
+    """
+    try:
+        return int(config.get("CONTEXT_WINDOW", 16384) or 16384)
+    except (TypeError, ValueError):
+        return 16384
+
+
+def _call_ollama(prompt, ollama_url, model, num_ctx=16384):
     try:
         resp = requests.post(
             f"{ollama_url}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False, "options": {"temperature": 0}},
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0, "num_ctx": num_ctx},
+            },
             timeout=EXTRACTION_TIMEOUT,
         )
         resp.raise_for_status()
@@ -92,7 +112,7 @@ def extract_facts(query, answer, config):
     ollama_url = config.get("OLLAMA_URL", "http://localhost:11434")
     model = config.get("MODELO_IA", "qwen2.5:1.5b")
     prompt = _SESSION_FACT_PROMPT.format(query=query, answer=answer)
-    raw = _call_ollama(prompt, ollama_url, model)
+    raw = _call_ollama(prompt, ollama_url, model, _num_ctx(config))
     return _parse_facts(raw)
 
 
@@ -101,7 +121,7 @@ def extract_global_facts(query, answer, config):
     ollama_url = config.get("OLLAMA_URL", "http://localhost:11434")
     model = config.get("MODELO_IA", "qwen2.5:1.5b")
     prompt = _GLOBAL_FACT_PROMPT.format(query=query, answer=answer)
-    raw = _call_ollama(prompt, ollama_url, model)
+    raw = _call_ollama(prompt, ollama_url, model, _num_ctx(config))
     return _parse_facts(raw)
 
 
@@ -220,7 +240,7 @@ def generate_checkpoint_summary(session_id, config):
     ollama_url = config.get("OLLAMA_URL", "http://localhost:11434")
     model = config.get("MODELO_IA", "qwen2.5:1.5b")
     prompt = _CHECKPOINT_PROMPT.format(transcript=transcript, existing_facts=existing_facts)
-    raw = _call_ollama(prompt, ollama_url, model)
+    raw = _call_ollama(prompt, ollama_url, model, _num_ctx(config))
     return raw.strip()
 
 
