@@ -205,14 +205,56 @@ $query"
             3)
                 limpar_tela_retro
                 echo -e "${GREEN}Alterar Modelo de IA${NC}"
-                echo -e "Modelos comuns: qwen2.5:7b, qwen2.5:1.5b, llama3:8b, phi3"
-                local novo_modelo
-                read -p "Digite o novo modelo (ou pressione Enter para manter '$MODELO_IA'): " novo_modelo
-                if [ -n "$novo_modelo" ]; then
-                    atualizar_configuracao "MODELO_IA" "$novo_modelo" "$APP_DIR"
-                    exibir_texto_digitando "Configuração atualizada: MODELO_IA=$novo_modelo"
+                echo ""
+
+                if ! ollama list &>/dev/null; then
+                    echo -e "${YELLOW}⚠️  Ollama não está em execução${NC}"
+                    echo ""
+                    echo -e "Modelo de IA atualmente configurado: ${BLUE}$MODELO_IA${NC}"
+                    echo ""
+                    echo -e "${YELLOW}Por favor, inicie o Ollama e retorne a esta opção para alterar o modelo.${NC}"
+                    echo ""
+                    echo -e "Para iniciar o Ollama:"
+                    echo -e "  - macOS/Linux: ${GREEN}ollama serve${NC}"
+                    echo -e "  - Docker: ${GREEN}bash web/run_dual_ollama.sh${NC}"
+                    echo ""
+                    read -p "Pressione [Enter] para retornar ao menu..."
+                else
+                    echo -e "${BLUE}Modelos instalados:${NC}"
+
+                    local -a modelos_array
+                    local -i contador=1
+
+                    while IFS= read -r linha; do
+                        [ -z "$linha" ] && continue
+                        [[ "$linha" == NAME* ]] && continue
+
+                        local modelo_nome=$(echo "$linha" | awk '{print $1}')
+                        [ -z "$modelo_nome" ] && continue
+
+                        modelos_array+=("$modelo_nome")
+                        printf "  ${GREEN}%2d)${NC} %s\n" "$contador" "$modelo_nome"
+                        ((contador++))
+                    done < <(ollama list)
+
+                    echo ""
+                    echo -e "${BLUE}Ou digite o nome de um modelo para baixar:${NC}"
+                    echo "Exemplos: qwen2.5:7b, qwen2.5:1.5b, llama3:8b, phi3"
+                    echo ""
+
+                    local novo_modelo
+                    read -p "Escolha o número ou digite o nome do modelo (Enter para manter '$MODELO_IA'): " novo_modelo
+
+                    if [[ "$novo_modelo" =~ ^[0-9]+$ ]] && [ "$novo_modelo" -ge 1 ] && [ "$novo_modelo" -le "${#modelos_array[@]}" ]; then
+                        novo_modelo="${modelos_array[$((novo_modelo - 1))]}"
+                    fi
+
+                    if [ -n "$novo_modelo" ]; then
+                        atualizar_configuracao "MODELO_IA" "$novo_modelo" "$APP_DIR"
+                        exibir_texto_digitando "Configuração atualizada: MODELO_IA=$novo_modelo"
+                    fi
+                    read -p "Pressione [Enter] para retornar ao menu..."
                 fi
-                read -p "Pressione [Enter] para retornar ao menu..."
                 ;;
             4)
                 limpar_tela_retro
