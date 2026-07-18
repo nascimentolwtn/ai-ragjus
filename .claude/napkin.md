@@ -92,3 +92,6 @@
 
 10. ✅ **[2026-07-16] Manual context compaction button ("Compact now")**
    Do instead: Shipped: 🗜️ button in chat header next to the context-window badge → `POST /api/sessions/<id>/compact` (synchronous, since the user is actively waiting) reuses the exact same `memory.compact_session()` as the item 8 auto-trigger, just with `reason="manual"`. Returns the checkpoint text for a toast confirmation; `chat.js` also refreshes the 🧠 memory disclosure panel (if open) and re-polls `/api/sessions/<id>/context-usage` so the badge reflects the shrunk context immediately.
+
+11. **[2026-07-18] Display inference timing metrics: think time, answer time, throughput (tokens/s)**
+   Do instead: Add SSE event `{"type":"stats","think_ms":..,"answer_ms":..,"tokens_per_sec":..}` after inference completes. Infer `think_ms` from Ollama's `eval_duration` (in nanoseconds) if exposed; fallback to elapsed time from prompt submission to first token. `answer_ms` = time from first token to stream close. Estimate `tokens_per_sec` using `prompt_eval_count + eval_count` divided by total wall-clock time (or use `output_tokens / answer_ms * 1000`). Render in chat header as a discrete metrics line (small grey text) or add toggleable "Metrics" panel in footer. UI: milliseconds for sub-second, seconds + decimals for longer runs.
