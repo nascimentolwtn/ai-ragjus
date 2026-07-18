@@ -51,7 +51,17 @@ for modulo in "${modulos[@]}"; do
     fi
 done
 
+
+# carregar_configuracoes sempre recarrega PROMPT_CLARIFICATION a partir do
+# config.conf, o que sobrescreveria o override por requisição que o Flask
+# envia via env var (o GUI é um toggle "ao vivo", sem precisar reiniciar o
+# servidor - ver web/app.py::api_chat). Preserva o valor recebido do
+# chamador, se houver, e o restaura depois de carregar a config.
+_prompt_clarification_override="${PROMPT_CLARIFICATION:-}"
+
 carregar_configuracoes "$APP_DIR"
+
+[ -n "$_prompt_clarification_override" ] && PROMPT_CLARIFICATION="$_prompt_clarification_override"
 
 # Sanitiza SCOPE_DOCS: precisa ser um array JSON de strings (caminhos absolutos).
 # Qualquer coisa diferente disso é descartada silenciosamente e o fluxo cai de
@@ -68,6 +78,15 @@ if [ -z "$query" ]; then
     jq -cn '{type:"error", content:"Pergunta vazia."}'
     echo '{"type":"done"}'
     exit 1
+fi
+
+# 0. Camada de clarificação (opcional): reescreve a pergunta em uma versão
+# mais detalhada, exibida como bloco <think>. A busca vetorial abaixo sempre
+# usa $query original - só o prompt final usa $query_detalhada.
+query_detalhada="$query"
+if [ "${PROMPT_CLARIFICATION:-1}" = "1" ]; then
+    detalhar_prompt_usuario "$query" || true
+    query_detalhada="$DETALHAMENTO_QUERY"
 fi
 
 # 1. Gera embedding para a pergunta
@@ -129,7 +148,7 @@ $RAG_MEMORY_CONTEXT"
 fi
 
 if [ -n "$contexto" ]; then
-    prompt="Você é um assistente jurídico especialista de elite. Baseado nos trechos de documentos fornecidos abaixo e nos metadados reais do acervo local, responda de forma clara e objetiva à pergunta do usuário.
+    prompt="Você é um assistente jurídico especialista de elite. Baseado nos trechos de documentos fornecidos abaixo e nos metadados reais do acervo local, responda de forma clara e objetiva à pergunta do usuário. Responda sempre no mesmo idioma do pedido do usuário (português ou inglês), independentemente do idioma dos documentos de contexto, a menos que o próprio pedido peça explicitamente outro idioma de saída.
 
 Metadados do Acervo Local:
 - Total de arquivos jurídicos indexados: $total_arquivos
@@ -139,12 +158,12 @@ Documentos Jurídicos de Contexto:
 $contexto
 
 Pergunta do Usuário:
-$query"
+$query_detalhada"
 else
-    prompt="Você é um assistente jurídico de elite. Diga de forma amigável e profissional que seu acervo local de documentos jurídicos está vazio ou não possui informações correlacionadas à pergunta, e oriente o usuário a colocar documentos na pasta de destino correspondente e reindexar.$memoria_bloco
+    prompt="Você é um assistente jurídico de elite. Diga de forma amigável e profissional que seu acervo local de documentos jurídicos está vazio ou não possui informações correlacionadas à pergunta, e oriente o usuário a colocar documentos na pasta de destino correspondente e reindexar. Responda sempre no mesmo idioma do pedido do usuário (português ou inglês).$memoria_bloco
 
 Pergunta do Usuário:
-$query"
+$query_detalhada"
 fi
 
 # 6. Gera a resposta (perguntar_ollama já emite tokens em JSON quando NON_INTERACTIVE=1)

@@ -55,6 +55,25 @@
         </section>
 
         <section class="settings-section">
+            <h2>Camada de Clarificação de Prompt</h2>
+            <p class="settings-hint">
+                Antes de gerar a resposta, reescreve pedidos curtos/ambíguos (ex.: "dobre
+                esse texto") em uma instrução mais detalhada, exibida como bloco de
+                raciocínio (&#128173;) na resposta. Não afeta a busca de documentos, que
+                sempre usa a pergunta original. Desative para comparar a resposta "crua"
+                de um modelo sem essa etapa extra.
+            </p>
+            <form id="prompt-clarification-form" class="auto-compact-form">
+                <label class="auto-compact-toggle">
+                    <input type="checkbox" id="prompt-clarification-enabled" {{ "checked" if prompt_clarification.enabled else "" }}>
+                    Ativar camada de clarificação
+                </label>
+                <button type="submit">Salvar</button>
+                <span class="auto-compact-status" id="prompt-clarification-status"></span>
+            </form>
+        </section>
+
+        <section class="settings-section">
             <h2>Memória Global</h2>
             <p class="settings-hint">
                 Fatos persistentes sobre você/seu domínio, injetados em toda conversa

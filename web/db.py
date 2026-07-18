@@ -359,6 +359,23 @@ def set_auto_compact_settings(enabled=None, threshold=None):
     return get_auto_compact_settings()
 
 
+# --- Prompt clarification layer toggle ---------------------------------
+# Rewrites short/ambiguous requests (e.g. "double this text") into a more
+# detailed instruction before the RAG generation call, shown to the user as
+# a <think> block. Same live-editable GUI-toggle pattern as auto-compact.
+
+PROMPT_CLARIFICATION_ENABLED_KEY = "PROMPT_CLARIFICATION_ENABLED"
+
+
+def get_prompt_clarification_setting():
+    return get_setting(PROMPT_CLARIFICATION_ENABLED_KEY, "1") != "0"
+
+
+def set_prompt_clarification_setting(enabled):
+    set_setting(PROMPT_CLARIFICATION_ENABLED_KEY, "1" if enabled else "0")
+    return get_prompt_clarification_setting()
+
+
 # --- Global cross-session memory (M4) --------------------------------------
 
 def list_global_memory():

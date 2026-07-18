@@ -181,4 +181,41 @@
                 });
         });
     }
+
+    // --- Prompt clarification layer -----------------------------------------
+    const promptClarificationForm = document.getElementById("prompt-clarification-form");
+    const promptClarificationEnabledInput = document.getElementById("prompt-clarification-enabled");
+    const promptClarificationStatusEl = document.getElementById("prompt-clarification-status");
+
+    function setPromptClarificationStatus(text, kind) {
+        if (!promptClarificationStatusEl) return;
+        promptClarificationStatusEl.textContent = text;
+        promptClarificationStatusEl.className = "auto-compact-status" + (kind ? " " + kind : "");
+    }
+
+    if (promptClarificationForm) {
+        promptClarificationForm.addEventListener("submit", function (ev) {
+            ev.preventDefault();
+            fetch("/api/settings/prompt-clarification", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ enabled: promptClarificationEnabledInput.checked }),
+            })
+                .then(function (r) {
+                    if (!r.ok) {
+                        return r.json().then(function (data) {
+                            throw new Error(data.error || "Falha ao salvar.");
+                        });
+                    }
+                    return r.json();
+                })
+                .then(function () {
+                    setPromptClarificationStatus("Salvo.", "success");
+                    setTimeout(function () { setPromptClarificationStatus(""); }, 3000);
+                })
+                .catch(function (err) {
+                    setPromptClarificationStatus(err.message || "Falha ao salvar.", "error");
+                });
+        });
+    }
 })();
