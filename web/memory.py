@@ -9,6 +9,7 @@ main chat flow (mirrors the napkin rule for perguntar_ollama/gerar_embedding
 resilience), so every network call is wrapped and swallowed.
 """
 import logging
+import re
 
 import requests
 
@@ -78,6 +79,25 @@ def _num_ctx(config):
         return 16384
 
 
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+def _strip_think(text):
+    """Drop <think>...</think> reasoning some models (e.g. lfm2.5, deepseek-r1,
+    qwq) emit before their real answer - mirrors src/ai.sh's TAG_PENSAMENTO_*
+    handling for the CLI/streaming path. Extraction calls here are
+    non-streaming, so the whole block lands in one response; left unstripped,
+    _parse_facts() treats each line of the model's internal monologue as a
+    candidate fact and persists it, poisoning session/global memory (global
+    facts get re-injected into every future session's prompt).
+    """
+    text = _THINK_BLOCK_RE.sub("", text or "")
+    # Truncated response (opening tag, no closing one yet): nothing after it
+    # is trustworthy, so drop from <think> onward.
+    text = re.split(r"<think>", text, maxsplit=1, flags=re.IGNORECASE)[0]
+    return text.strip()
+
+
 def _call_ollama(prompt, ollama_url, model, num_ctx=16384):
     try:
         resp = requests.post(
@@ -91,7 +111,7 @@ def _call_ollama(prompt, ollama_url, model, num_ctx=16384):
             timeout=EXTRACTION_TIMEOUT,
         )
         resp.raise_for_status()
-        return resp.json().get("response", "")
+        return _strip_think(resp.json().get("response", ""))
     except (requests.RequestException, ValueError) as exc:
         logger.warning("memory extraction call failed: %s", exc)
         return ""

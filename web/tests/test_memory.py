@@ -33,6 +33,37 @@ def test_extract_facts_parses_ollama_response(monkeypatch):
     assert facts == ["fato A", "fato B"]
 
 
+def test_strip_think_removes_reasoning_block():
+    raw = "<think>\nThe user asks in Portuguese...\nThus final answer: NENHUM.\n</think>\nNENHUM"
+    assert memory._strip_think(raw) == "NENHUM"
+
+
+def test_strip_think_drops_truncated_open_tag():
+    raw = "<think>\nStill reasoning and never closed"
+    assert memory._strip_think(raw) == ""
+
+
+def test_strip_think_noop_without_tags():
+    assert memory._strip_think("fato A\nfato B") == "fato A\nfato B"
+
+
+def test_call_ollama_reasoning_leakage_never_reaches_facts(monkeypatch):
+    """Regression: a reasoning model (e.g. lfm2.5) that emits <think> before
+    its real answer must not have its internal monologue parsed as facts and
+    persisted into session/global memory (global facts leak into every
+    future session's prompt - this previously poisoned the app cross-chat)."""
+    raw = (
+        "<think>\n"
+        "The user asks: \"olá\". Responda SOMENTE com os fatos, um por linha, "
+        "no formato 'chave_curta: valor descritivo'. Thus final answer: NENHUM.\n"
+        "</think>\n"
+        "NENHUM"
+    )
+    monkeypatch.setattr(memory.requests, "post", lambda *a, **k: _FakeResponse(raw))
+    facts = memory.extract_global_facts("olá", "resposta", {"OLLAMA_URL": "http://x", "MODELO_IA": "m"})
+    assert facts == []
+
+
 def test_extract_facts_swallows_network_errors(monkeypatch):
     def raise_err(*a, **k):
         raise memory.requests.RequestException("boom")

@@ -50,7 +50,10 @@
 1. **[2026-07-12] src/ingest.sh handles document extraction dispatch**
    Do instead: extrair_texto_limpo() matches file extension (pdf→pdftotext, docx→pandoc, txt→cat). To add new format: add case statement + tool binary.
 
-2. **[2026-07-12] src/ai.sh implements self-healing model download**
+2. **[2026-07-17] web/static/chat.js: guard async callbacks with sessionEpoch**
+   Do instead: Any new async flow (fetch/SSE) that mutates session-scoped UI (context monitor, message list, currentSessionId) must capture `sessionEpoch` (bumped in loadSession/newChatBtn) or the session id at kickoff and bail if it changed by callback time. No AbortController pattern exists in this file.
+
+3. **[2026-07-12] src/ai.sh implements self-healing model download**
    Do instead: If model not found, gerar_embedding() prompts user, auto-downloads via Ollama, retries. Do not skip this flow; it defines the UX.
 
 ## Local Development Setup

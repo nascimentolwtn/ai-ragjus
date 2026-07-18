@@ -22,6 +22,9 @@
     const sidebarOverlayEl = document.getElementById("sidebar-overlay");
 
     let currentSessionId = null;
+    // Bumped on every session navigation (loadSession / new chat) so in-flight
+    // async callbacks from a previous session can detect they are stale.
+    let sessionEpoch = 0;
     let sending = false;
 
     // Multi-doc scope selector state. `pendingScope` holds the selection made
@@ -667,12 +670,14 @@
     }
 
     function loadSession(sessionId) {
+        const epoch = ++sessionEpoch;
         fetch("/api/sessions/" + sessionId)
             .then(function (r) {
                 if (!r.ok) throw new Error("Sessão não encontrada.");
                 return r.json();
             })
             .then(function (data) {
+                if (epoch !== sessionEpoch) return;
                 currentSessionId = sessionId;
                 clearMessages();
                 data.messages.forEach(function (m) {
@@ -685,12 +690,14 @@
                 closeSidebar();
             })
             .catch(function (err) {
+                if (epoch !== sessionEpoch) return;
                 addMessage("error", "Falha ao carregar conversa: " + err.message);
             });
     }
 
     newChatBtn.addEventListener("click", function () {
         closeSidebar();
+        sessionEpoch++;
         currentSessionId = null;
         pendingScope = [];
         clearMessages();
@@ -730,6 +737,7 @@
         sendBtn.disabled = true;
 
         const assistantContentEl = addMessage("assistant", "", { streaming: true });
+        const epoch = sessionEpoch;
         let accumulated = "";
         let sources = [];
         let sawError = false;
@@ -753,11 +761,13 @@
 
             await consumeSSE(response, function (event) {
                 if (event.type === "session" && event.session_id) {
-                    currentSessionId = event.session_id;
-                    // Scope was persisted server-side from `selected_docs` above
-                    // (or is empty); the pending buffer is no longer needed.
-                    pendingScope = [];
-                    updateContextUsage({ query: query.length });
+                    if (epoch === sessionEpoch) {
+                        currentSessionId = event.session_id;
+                        // Scope was persisted server-side from `selected_docs` above
+                        // (or is empty); the pending buffer is no longer needed.
+                        pendingScope = [];
+                        updateContextUsage({ query: query.length });
+                    }
                 } else if (event.type === "token") {
                     accumulated += event.content || "";
                     assistantContentEl.dataset.raw = accumulated;
@@ -766,9 +776,11 @@
                 } else if (event.type === "sources") {
                     sources = event.content || [];
                     // Rough retrieved-docs char estimate (CHUNK_SIZE default ~1000/chunk).
-                    updateContextUsage({ query: query.length, retrieved_docs: sources.length * 1000 });
+                    if (epoch === sessionEpoch) {
+                        updateContextUsage({ query: query.length, retrieved_docs: sources.length * 1000 });
+                    }
                 } else if (event.type === "stats") {
-                    updateContextUsageExact(event.prompt_eval_count);
+                    if (epoch === sessionEpoch) updateContextUsageExact(event.prompt_eval_count);
                 } else if (event.type === "compact") {
                     // Backlog item 8: server auto-compacted this session's
                     // memory context after crossing the configured threshold.
@@ -778,7 +790,7 @@
                         { duration: 6000 }
                     );
                     refreshMemoryPanel();
-                    updateContextUsage({ query: query.length });
+                    if (epoch === sessionEpoch) updateContextUsage({ query: query.length });
                 } else if (event.type === "error") {
                     sawError = true;
                     accumulated += (accumulated ? "\n" : "") + "[Erro] " + event.content;
@@ -1453,13 +1465,17 @@
 
     function updateContextUsage(promptEstimate) {
         if (!contextMonitorEl || !currentSessionId) return;
-        fetch("/api/sessions/" + currentSessionId + "/context-usage", {
+        const sessionId = currentSessionId;
+        fetch("/api/sessions/" + sessionId + "/context-usage", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(promptEstimate || {}),
         })
             .then(function (r) { return r.json(); })
-            .then(function (data) { renderContextUsage(data, false); })
+            .then(function (data) {
+                if (String(sessionId) !== String(currentSessionId)) return;
+                renderContextUsage(data, false);
+            })
             .catch(function (err) { console.error("Falha ao calcular uso de contexto:", err); });
     }
 
