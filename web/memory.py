@@ -14,6 +14,7 @@ import re
 import requests
 
 import db
+from config_utils import resolve_context_window
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +71,15 @@ def _num_ctx(config):
     Ollama reloads a resident model whenever a request's num_ctx differs from
     what it was loaded with. Omitting it here made these background calls hit
     the GPU inference model at Ollama's 4096 default, forcing a reload on every
-    turn (and another reload back to 16384 on the next real question). Keeping
-    the value identical avoids the churn.
+    turn (and another reload back to the real value on the next real
+    question). Keeping the value identical avoids the churn.
+
+    Resolves CONTEXT_WINDOW="auto" via resolve_context_window() - same
+    MODEL_CONTEXT_MAP/detect_model_context() logic the Bash CLI uses - so the
+    background extraction calls agree with the main RAG path's num_ctx instead
+    of falling back to a smaller hardcoded default.
     """
-    try:
-        return int(config.get("CONTEXT_WINDOW", 16384) or 16384)
-    except (TypeError, ValueError):
-        return 16384
+    return resolve_context_window(config.get("MODELO_IA"), config.get("CONTEXT_WINDOW", "auto"))
 
 
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)

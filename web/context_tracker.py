@@ -10,6 +10,7 @@ client-side with an exact number.
 """
 import db
 import memory
+from config_utils import resolve_context_window
 
 
 class ContextTracker:
@@ -31,11 +32,14 @@ class ContextTracker:
         TOKEN_RATIO strings from config.conf). Shared by the context-usage
         endpoint and the auto-compact threshold check in /api/chat (backlog
         item 8) so both agree on the same available-token math.
+
+        CONTEXT_WINDOW="auto" (config.conf's default) is resolved via
+        resolve_context_window(), mirroring the CLI's own
+        detect_model_context() so both surfaces send Ollama the same num_ctx.
         """
-        try:
-            context_window = int(config.get("CONTEXT_WINDOW", 16384))
-        except (TypeError, ValueError):
-            context_window = 16384
+        context_window = resolve_context_window(
+            config.get("MODELO_IA"), config.get("CONTEXT_WINDOW", "auto")
+        )
         try:
             token_ratio = float(config.get("TOKEN_RATIO", 0.30))
         except (TypeError, ValueError):

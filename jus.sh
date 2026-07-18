@@ -34,6 +34,13 @@ done
 # Carrega as configurações
 carregar_configuracoes "$APP_DIR"
 
+# Log de inicialização: janela de contexto (CONTEXT_WINDOW) resolvida por
+# detect_model_context() (src/ai.sh) dentro de carregar_configuracoes(),
+# a partir de MODELO_IA e do mapa MODELO_CONTEXT_MAP (src/config.sh).
+if [ "$NON_INTERACTIVE" != "1" ]; then
+    echo -e "${BLUE}[INFO] Janela de contexto ativa: ${CONTEXT_WINDOW} tokens (modelo: ${MODELO_IA})${NC}"
+fi
+
 # 2b. Gate de autenticação RAGSEC - roda ANTES do menu principal.
 # Quando RAGSEC_MODE=0 este bloco inteiro é ignorado (compatibilidade retroativa).
 if [ "${RAGSEC_MODE:-0}" = "1" ]; then
@@ -108,8 +115,17 @@ menu_principal() {
                         continue
                     fi
                     
+                    # 0. Camada de clarificação (opcional): reescreve a pergunta em uma
+                    # versão mais detalhada, exibida como bloco <think>. A busca vetorial
+                    # abaixo sempre usa $query original - só o prompt final usa $query_detalhada.
+                    local query_detalhada="$query"
+                    if [ "${PROMPT_CLARIFICATION:-1}" = "1" ]; then
+                        detalhar_prompt_usuario "$query" || true
+                        query_detalhada="$DETALHAMENTO_QUERY"
+                    fi
+
                     echo -ne "${GREEN_DIM}Buscando fatos e gerando resposta...${NC}\n"
-                    
+
                     # 1. Gera embedding para a pergunta
                     local vetor_query
                     vetor_query=$(gerar_embedding "$query" 2>/dev/null || echo "")
@@ -145,7 +161,7 @@ menu_principal() {
                     # 4. Monta o prompt RAG
                     local prompt
                     if [ -n "$contexto" ]; then
-                        prompt="Você é um assistente jurídico especialista de elite. Baseado nos trechos de documentos fornecidos abaixo e nos metadados reais do acervo local, responda de forma clara e objetiva à pergunta do usuário.
+                        prompt="Você é um assistente jurídico especialista de elite. Baseado nos trechos de documentos fornecidos abaixo e nos metadados reais do acervo local, responda de forma clara e objetiva à pergunta do usuário. Responda sempre no mesmo idioma do pedido do usuário (português ou inglês), independentemente do idioma dos documentos de contexto, a menos que o próprio pedido peça explicitamente outro idioma de saída.
 
 Metadados do Acervo Local:
 - Total de arquivos jurídicos indexados: $total_arquivos
@@ -155,12 +171,12 @@ Documentos Jurídicos de Contexto:
 $contexto
 
 Pergunta do Usuário:
-$query"
+$query_detalhada"
                     else
-                        prompt="Você é um assistente jurídico de elite. Diga de forma amigável e profissional que seu acervo local de documentos jurídicos está vazio ou não possui informações correlacionadas à pergunta, e oriente o usuário a colocar documentos na pasta de destino correspondente e reindexar.
-                        
+                        prompt="Você é um assistente jurídico de elite. Diga de forma amigável e profissional que seu acervo local de documentos jurídicos está vazio ou não possui informações correlacionadas à pergunta, e oriente o usuário a colocar documentos na pasta de destino correspondente e reindexar. Responda sempre no mesmo idioma do pedido do usuário (português ou inglês).
+
 Pergunta do Usuário:
-$query"
+$query_detalhada"
                     fi
 
                     if [ "${RAGSEC_MODE:-0}" = "1" ]; then
@@ -369,12 +385,13 @@ menu_configuracoes_avancadas() {
         echo -e "  3) Alterar Sobreposição de Bloco / Chunk Overlap [Atual: ${BLUE}$CHUNK_OVERLAP${NC}] (caracteres)"
         echo -e "  4) Alterar Tamanho Máximo de Arquivo [Atual: ${BLUE}$MAX_FILE_SIZE_MB MB${NC}]"
         echo -e "  5) Alterar Modelo de Embedding [Atual: ${BLUE}$MODELO_EMBEDDING${NC}]"
-        echo -e "  6) Voltar ao Menu Principal"
+        echo -e "  6) Ativar/Desativar Camada de Clarificação de Prompt [Atual: ${BLUE}$([ "${PROMPT_CLARIFICATION:-1}" = "1" ] && echo "Ativado" || echo "Desativado")${NC}]"
+        echo -e "  7) Voltar ao Menu Principal"
         echo -e ""
         echo -e "${GREEN}=========================================================================${NC}"
-        
+
         local opcao_avancada
-        read -p "Digite a opção desejada (1-6): " opcao_avancada
+        read -p "Digite a opção desejada (1-7): " opcao_avancada
         
         case "$opcao_avancada" in
             1)
@@ -438,6 +455,20 @@ menu_configuracoes_avancadas() {
                 read -p "Pressione [Enter] para continuar..."
                 ;;
             6)
+                limpar_tela_retro
+                echo -e "${GREEN}Camada de Clarificação de Prompt${NC}"
+                echo -e "Antes de gerar a resposta, reescreve pedidos curtos/ambíguos (ex.: 'dobre esse texto') em uma instrução mais detalhada, exibida como bloco de raciocínio. Desligue para comparar a resposta 'crua' de um modelo sem essa etapa extra."
+                local novo_estado
+                if [ "${PROMPT_CLARIFICATION:-1}" = "1" ]; then
+                    read -p "Está ativado. Desativar? (s/n): " novo_estado
+                    [ "$novo_estado" = "s" ] || [ "$novo_estado" = "S" ] && atualizar_configuracao "PROMPT_CLARIFICATION" "0" "$APP_DIR" && exibir_texto_digitando "Camada de clarificação desativada."
+                else
+                    read -p "Está desativado. Ativar? (s/n): " novo_estado
+                    [ "$novo_estado" = "s" ] || [ "$novo_estado" = "S" ] && atualizar_configuracao "PROMPT_CLARIFICATION" "1" "$APP_DIR" && exibir_texto_digitando "Camada de clarificação ativada."
+                fi
+                read -p "Pressione [Enter] para continuar..."
+                ;;
+            7)
                 break
                 ;;
             *)

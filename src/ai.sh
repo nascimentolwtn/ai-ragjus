@@ -27,6 +27,30 @@ fi
 readonly TAG_PENSAMENTO_ABRE='<think>'
 readonly TAG_PENSAMENTO_FECHA='</think>'
 
+# Resolve a janela de contexto (num_ctx) a partir do modelo configurado,
+# quando CONTEXT_WINDOW="auto" no config.conf. Consulta MODELO_CONTEXT_MAP
+# (declarado em src/config.sh) - sem chamadas de rede, apenas uma tabela de
+# valores conhecidos. Chamada uma única vez por carregar_configuracoes(),
+# no load da config; perguntar_ollama() só enxerga o valor já resolvido.
+# Uso: detect_model_context "<modelo>" "<CONTEXT_WINDOW configurado>"
+detect_model_context() {
+    local modelo="$1"
+    local configurado="$2"
+
+    # Valor explícito no config.conf: nada a detectar, apenas repassa.
+    if [ "$configurado" != "auto" ]; then
+        echo "$configurado"
+        return 0
+    fi
+
+    if [ -n "${MODELO_CONTEXT_MAP[$modelo]+x}" ]; then
+        echo "${MODELO_CONTEXT_MAP[$modelo]}"
+    else
+        # Fallback conservador para modelos ausentes do mapa.
+        echo 8192
+    fi
+}
+
 # Gera o vetor de embedding para um bloco de texto (com auto-recuperação de modelo ausente)
 gerar_embedding() {
     local texto="$1"
@@ -264,4 +288,108 @@ perguntar_ollama() {
     # Quebra de linha ao final do streaming (apenas na CLI interativa; o modo
     # NON_INTERACTIVE já emite eventos JSON linha-a-linha e não precisa disso)
     [ "$NON_INTERACTIVE" = "1" ] || echo ""
+}
+
+# Camada de clarificação de prompt: reescreve pedidos curtos/ambíguos do
+# usuário (ex.: "dobre esse texto") em uma instrução mais detalhada antes da
+# geração final, para compensar modelos menores que tendem a interpretar
+# esses pedidos de forma literal/matemática em vez de gerar conteúdo novo.
+# A busca vetorial nunca usa o resultado desta função - só a pergunta
+# original é usada para recuperar trechos, evitando viés de retrieval.
+#
+# Como o bloco <think> resultante precisa ser impresso no stdout real do
+# stream (para chegar ao terminal/SSE na ordem certa) e a query detalhada
+# precisa ser lida pelo chamador, o retorno não pode ser feito via $(...)
+# (perderia o efeito de impressão). Por isso o texto detalhado fica em
+# $DETALHAMENTO_QUERY após a chamada, seguindo o mesmo padrão de estado
+# global já usado por STREAM_PENSANDO/STREAM_BUFFER.
+DETALHAMENTO_QUERY=""
+
+detalhar_prompt_usuario() {
+    local query="$1"
+    DETALHAMENTO_QUERY="$query"
+
+    # Atalho para saudações/agradecimentos triviais: nada a clarificar aqui, e
+    # mandar isso para o modelo só gera latência e risco de o pedido "reescreva
+    # isso" se confundir com o próprio conteúdo do pedido (ver caso "olá", que
+    # gerava uma resposta sobre a tarefa de reescrita em vez de um cumprimento).
+    local query_norm
+    query_norm=$(echo "$query" | tr '[:upper:]' '[:lower:]' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[!?.,]*$//')
+    case "$query_norm" in
+        oi|olá|ola|hello|hi|hey|opa|eae|"e aí"|eai|"bom dia"|"boa tarde"|"boa noite"|obrigado|obrigada|obg|valeu|thanks|"thank you"|thx|tchau|bye|blz|beleza|"tudo bem"|"tudo bom"|"como vai"|"how are you"|teste|test)
+            return 0
+            ;;
+    esac
+
+    if [ -z "$OLLAMA_URL" ] || [ -z "$MODELO_IA" ]; then
+        return 1
+    fi
+
+    local sistema="Você é uma camada de pré-processamento de prompts, não o assistente que responde ao usuário. Sua tarefa é reescrever o pedido abaixo apenas quando ele for ambíguo ou incompleto sobre o que o usuário realmente quer. Não responda ao pedido - apenas reescreva-o (ou repita-o sem alterações, se já estiver claro).
+
+Regras (em ordem de prioridade):
+1. Se o pedido envolver mudar o tamanho ou a forma de um texto (aumentar, dobrar, expandir, ampliar, encurtar, reduzir, cortar pela metade, resumir ou reescrever), SEMPRE reescreva deixando explícito que isso significa reescrever o conteúdo de forma fluida e coesa (adicionando profundidade ou condensando ideias, conforme o pedido) - nunca contar palavras, cortar o texto arbitrariamente no meio de uma frase, ou simplesmente repetir/truncar trechos literalmente. Isso vale mesmo que o pedido pareça simples e direto - o risco de execução mecânica mora justamente nesses pedidos curtos.
+2. Para qualquer outro pedido que já seja claro, direto ou simples (saudações, perguntas objetivas, comandos triviais fora do escopo da regra 1), responda repetindo o pedido original exatamente como foi escrito, sem adicionar nada.
+3. Não invente requisitos que não estejam implícitos no pedido original. Nunca inclua, na sua resposta, instruções sobre como você mesmo deve reescrever o pedido - a resposta é só o pedido em si (original ou detalhado), nunca uma descrição da tarefa de reescrita.
+4. Responda apenas com o pedido (original ou reescrito) - sem comentários, sem explicações, sem repetir estas regras.
+
+Pedido do usuário:
+$query"
+
+    local ctx_window="${CONTEXT_WINDOW:-16384}"
+    local json_payload
+    json_payload=$(jq -n --arg model "$MODELO_IA" --arg prompt "$sistema" --argjson temp "$TEMPERATURA" --argjson ctx "$ctx_window" \
+        '{"model": $model, "prompt": $prompt, "stream": false, "options": {"temperature": $temp, "num_ctx": $ctx}}')
+
+    local response bruto
+    response=$(curl -s -X POST "$OLLAMA_URL/api/generate" \
+        -H "Content-Type: application/json" \
+        -d "$json_payload" 2>/dev/null || echo "")
+    bruto=$(echo "$response" | jq -r '.response // empty' 2>/dev/null || echo "")
+    bruto=$(echo "$bruto" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+    # Falha silenciosa: segue com a query original, sem bloquear o fluxo principal
+    [ -z "$bruto" ] && return 1
+
+    # Se MODELO_IA for um modelo de raciocínio (deepseek-r1, qwq, lfm2.5, etc.),
+    # $bruto já vem com seu próprio bloco <think>...</think> embutido antes do
+    # texto reescrito. Separa as duas partes: o raciocínio é mantido só para
+    # exibição (útil para comparar a qualidade de "pensamento" entre modelos),
+    # mas NUNCA repassado adiante - colar o rascunho bruto na "Pergunta do
+    # Usuário" da geração final reintroduziria justamente o tipo de raciocínio
+    # matemático-literal que esta camada existe para evitar. $detalhado (só o
+    # pedido reescrito) é o que vira DETALHAMENTO_QUERY.
+    local raciocinio="" detalhado="$bruto"
+    if [[ "$bruto" == *"$TAG_PENSAMENTO_ABRE"*"$TAG_PENSAMENTO_FECHA"* ]]; then
+        local resto="${bruto#*"$TAG_PENSAMENTO_ABRE"}"
+        raciocinio="${resto%%"$TAG_PENSAMENTO_FECHA"*}"
+        detalhado="${resto#*"$TAG_PENSAMENTO_FECHA"}"
+        raciocinio=$(echo "$raciocinio" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        detalhado=$(echo "$detalhado" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        # Segurança: se o strip esvaziar o texto reescrito, cai de volta ao
+        # bruto inteiro em vez de deixar DETALHAMENTO_QUERY vazio.
+        [ -z "$detalhado" ] && detalhado="$bruto"
+    fi
+
+    local conteudo_pensamento="$detalhado"
+    [ -n "$raciocinio" ] && conteudo_pensamento="$raciocinio
+
+$detalhado"
+
+    local bloco_pensamento="${TAG_PENSAMENTO_ABRE}
+${conteudo_pensamento}
+${TAG_PENSAMENTO_FECHA}
+
+"
+
+    if [ "$NON_INTERACTIVE" = "1" ]; then
+        jq -cn --arg t "$bloco_pensamento" '{type:"token", content:$t}'
+    else
+        _imprimir_stream_com_pensamento "$bloco_pensamento"
+        STREAM_PENSANDO=false
+        STREAM_BUFFER=""
+        echo ""
+    fi
+
+    DETALHAMENTO_QUERY="$detalhado"
 }

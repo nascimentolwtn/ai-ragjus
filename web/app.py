@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import db  # noqa: E402
 import ingest  # noqa: E402
 import memory  # noqa: E402
+from config_utils import resolve_context_window  # noqa: E402
 from context_tracker import ContextTracker  # noqa: E402
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -88,6 +89,18 @@ try:
 except (TypeError, ValueError):
     _max_upload_mb = 50.0
 app.config["MAX_CONTENT_LENGTH"] = int(_max_upload_mb * 1024 * 1024) + 1024 * 1024
+
+# Resolve CONTEXT_WINDOW="auto" once at startup (mirrors src/config.sh's
+# one-time detect_model_context() resolution) so every downstream consumer
+# (ContextTracker, memory.py's background extraction/checkpoint calls) uses
+# the identical num_ctx the CLI resolved, instead of each one re-resolving
+# "auto" independently. config.conf changes require a restart anyway (see
+# CLAUDE.md), so recomputing this on every load_config() call would be
+# wasted work.
+_startup_config = load_config()
+app.config["RESOLVED_CONTEXT_WINDOW"] = resolve_context_window(
+    _startup_config.get("MODELO_IA"), _startup_config.get("CONTEXT_WINDOW", "auto")
+)
 
 
 def _derive_title(text, max_words=8):
@@ -239,6 +252,7 @@ def api_context_usage(session_id):
         return jsonify({"error": "Sessão não encontrada."}), 404
 
     config = load_config()
+    config["CONTEXT_WINDOW"] = app.config["RESOLVED_CONTEXT_WINDOW"]
     tracker = ContextTracker.from_config(config)
     prompt_estimate = request.get_json(silent=True) or {}
     usage = tracker.calculate_usage(session_id, prompt_char_estimate=prompt_estimate)
@@ -276,6 +290,7 @@ def api_compact_session(session_id):
         return jsonify({"error": "Sessão não encontrada."}), 404
 
     config = load_config()
+    config["CONTEXT_WINDOW"] = app.config["RESOLVED_CONTEXT_WINDOW"]
     turn_number = db.count_user_messages(session_id)
     if turn_number <= 0:
         return jsonify({"error": "Nada para compactar ainda nesta conversa."}), 400
@@ -322,6 +337,21 @@ def api_set_auto_compact_settings():
         threshold=threshold,
     )
     return jsonify({"ok": True, **db.get_auto_compact_settings()})
+
+
+@app.route("/api/settings/prompt-clarification", methods=["GET"])
+def api_get_prompt_clarification_setting():
+    """Enable/disable the prompt-clarification layer, surfaced on /settings."""
+    return jsonify({"enabled": db.get_prompt_clarification_setting()})
+
+
+@app.route("/api/settings/prompt-clarification", methods=["POST"])
+def api_set_prompt_clarification_setting():
+    payload = request.get_json(silent=True) or {}
+    enabled = payload.get("enabled")
+    if enabled is None:
+        return jsonify({"error": "Campo 'enabled' é obrigatório."}), 400
+    return jsonify({"ok": True, "enabled": db.set_prompt_clarification_setting(bool(enabled))})
 
 
 @app.route("/api/sessions/<int:session_id>/attach-file", methods=["POST"])
@@ -398,10 +428,12 @@ def api_chat():
     db.add_message(session_id, "user", query)
 
     config = load_config()
+    config["CONTEXT_WINDOW"] = app.config["RESOLVED_CONTEXT_WINDOW"]
 
     def generate():
         env = os.environ.copy()
         env["NON_INTERACTIVE"] = "1"
+        env["PROMPT_CLARIFICATION"] = "1" if db.get_prompt_clarification_setting() else "0"
 
         # Pass document scope (if any) to the RAG subprocess via env var.
         scope = db.get_session_scope(session_id)
@@ -634,11 +666,13 @@ def settings_page():
     Also surfaces the item 8 auto-compact toggle/threshold (GUI-level
     setting, live-editable without a restart)."""
     config = load_config()
+    config["CONTEXT_WINDOW"] = app.config["RESOLVED_CONTEXT_WINDOW"]
     return render_template(
         "settings.html",
         config=config,
         memory=db.list_global_memory(),
         auto_compact=db.get_auto_compact_settings(),
+        prompt_clarification={"enabled": db.get_prompt_clarification_setting()},
     )
 
 
